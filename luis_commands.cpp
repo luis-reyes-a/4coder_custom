@@ -21,11 +21,95 @@ view_new_tab_group(Application_Links *app, View_ID view)
    }   
 }
 
-CUSTOM_COMMAND_SIG(view_new_tab_group)
+CUSTOM_COMMAND_SIG(luis_new_tab_group)
 CUSTOM_DOC("make a new tab group")
 {
    View_ID view = get_active_view(app, Access_Always);
    view_new_tab_group(app, view);
+}
+
+CUSTOM_COMMAND_SIG(luis_kill_tab_group)
+CUSTOM_DOC("kill current tab group")
+{
+   if(BUFFER_TAB_GROUP_COUNT > 1)
+   {
+      View_ID view = get_active_view(app, Access_Always);
+      Managed_Scope scope = view_get_managed_scope(app, view);
+      i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+      if(tab_group_index)
+      {
+         BUFFER_TAB_GROUPS[*tab_group_index] = {};
+         BUFFER_TAB_GROUP_COUNT -= 1;
+         
+         i32 original_tab_group_index = *tab_group_index;
+         i32 safe_group_index = 0;
+         foreach_index_inc(group_index, countof(BUFFER_TAB_GROUPS))
+         {
+            if(BUFFER_TAB_GROUPS[group_index].tab_count > 0)
+            {
+               safe_group_index = group_index;
+               break;
+            }
+         }
+         
+         View_ID v = view;
+         do 
+         {
+            Managed_Scope s = view_get_managed_scope(app, v);
+            i32 *index = scope_attachment(app, s, view_tab_group_index, i32);
+            if(index && *index == original_tab_group_index)
+               *index = safe_group_index;
+            v = get_next_view_looped_all_panels(app, v, Access_Always);
+         } while(v != view);
+      }
+   }
+}
+
+CUSTOM_COMMAND_SIG(luis_tab_group_lister)
+CUSTOM_DOC("switch to new tab group")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+   if(!tab_group_index)	return;
+   
+   Scratch_Block scratch(app);
+   Lister_Block lister(app, scratch);
+   lister_set_query(lister, SCu8("Switch to tab group..."));
+   lister_set_default_handlers(lister);
+ 
+   foreach_index_inc(group_index, countof(BUFFER_TAB_GROUPS))
+   {
+      Buffer_Tab_Group *group = BUFFER_TAB_GROUPS + group_index;
+      if(group->tab_count > 0)
+      {
+         LOCAL_STRING_BUILDER(builder, 1024);
+         foreach_index_inc(tab_index, group->tab_count)
+         {
+            String_Const_u8 name = push_buffer_unique_name(app, scratch, group->tabs[tab_index]);
+            append(&builder, name);
+            append(&builder, " ");
+         }
+         lister_add_item(lister, mkstr(&builder), SCu8(), (void*)(i64)group_index, 0);
+      }
+   }
+   
+   Lister_Result l_result = run_lister(app, lister);
+   if(!l_result.canceled)
+   {
+      i32 new_tab_group_index = (i32)(i64)l_result.user_data;
+      if(new_tab_group_index != *tab_group_index)
+      {
+         *tab_group_index = new_tab_group_index;
+      }
+   }
+}
+
+CUSTOM_COMMAND_SIG(luis_new_tab)
+CUSTOM_DOC("make a new tab group")
+{
+   luis_view_set_flags(app, get_active_view(app, Access_Always), VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+   interactive_open_or_new(app);
 }
 
 internal void
@@ -126,7 +210,9 @@ luis_offset_code_index(Application_Links *app, i32 offset)
          View_ID peek = luis_get_or_split_peek_window(app, view, ViewSplit_Bottom);
          if(peek)
          {
-            view_set_buffer(); //TODO!
+            view_set_buffer(app, peek, note->file->buffer, 0); 
+            view_new_tab_group(app, peek);
+            luis_view_set_flags(app, peek, VIEW_IS_PEEK_WINDOW);
             state->index = new_index;   
          }
          
@@ -557,12 +643,12 @@ CUSTOM_COMMAND_SIG(luis_fsearch)
 CUSTOM_DOC("search forwards")
 {
    View_ID view = get_active_view(app, Access_Always);
-   isearch(app, Scan_Forward, view_get_cursor_pos(app, view), SCu8());
+   luis_isearch(app, Scan_Forward, view_get_cursor_pos(app, view), SCu8());
 }
 
 CUSTOM_COMMAND_SIG(luis_rsearch)
 CUSTOM_DOC("search backwards")
 {
    View_ID view = get_active_view(app, Access_Always);
-   isearch(app, Scan_Backward, view_get_cursor_pos(app, view), SCu8());
+   luis_isearch(app, Scan_Backward, view_get_cursor_pos(app, view), SCu8());
 }

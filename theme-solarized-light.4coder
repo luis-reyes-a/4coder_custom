@@ -1,0 +1,67 @@
+defcolor_back = 0xfffdf6e3;
+defcolor_margin = 0xfffdf6e3; // below with lower brightness
+defcolor_margin_hover = 0xfffdf6e3;
+defcolor_margin_active =  0xfffdf6e3; //0xFF073642;
+defcolor_list_item = 0xfffdf6e3;
+defcolor_list_item_hover = 0xfffdf6e3;
+defcolor_list_item_active = 0xffeee8d5;
+
+// red - 0xFFdc322f
+// orange - 0xffcb4b16
+// green - 0xff859900 for hightligh?
+// pink - 0xffd33682
+
+defcolor_cursor = 0xff657b83;
+defcolor_at_cursor = defcolor_back;
+defcolor_highlight_cursor_line = 0xffeee8d5;
+defcolor_highlight = 0xff586e75;
+defcolor_mark = 0xff93a1a1;
+
+defcolor_text_default = 0xff586e75; 
+defcolor_at_highlight = defcolor_back;
+defcolor_comment = 0xff859900; //0xFF586e75;
+defcolor_comment_pop = {0xff268bd2, 0xffdc322f};
+
+
+defcolor_keyword = 0xff268bd2;
+
+defcolor_str_constant = 0xff2aa198;
+defcolor_char_constant = defcolor_str_constant;
+
+defcolor_int_constant = 0xff2aa198;
+defcolor_float_constant = defcolor_int_constant;
+defcolor_bool_constant = defcolor_int_constant;
+defcolor_include = 0xff2aa198;
+defcolor_preproc = 0xffb58900; //0xFF4E5E46;
+defcolor_special_character = 0xFF4E5E46;
+defcolor_ghost_character = 0xFF4E5E46;
+
+defcolor_paste = 0xFFDDEE00;
+defcolor_undo  = 0xFF00DDEE;
+
+//error highlights
+defcolor_highlight_junk  = 0x22d33682;
+defcolor_highlight_white = 0x22859900;
+
+defcolor_bar = 0xff93a1a1; //NOTE what's this?
+defcolor_bar_active = 0xff839496; //NOTE what's this?
+defcolor_base = defcolor_back; //NOTE what's this?
+defcolor_pop1 = 0xffdc322f;
+defcolor_pop2 = 0xff268bd2;
+
+// default
+defcolor_back_cycle = {0x00A00000, 0x0000A000, 0x000000A0, 0x00A0A000};
+defcolor_text_cycle = {0xff000000, 0xffdc322f, 0xff6c71c4, 0xff2aa198, 0xff268bd2, 0xffd33682};
+
+// default
+defcolor_line_numbers_back = 0xff839496;
+defcolor_line_numbers_text = 0xfffdf6e3;
+
+luiscolor_variable_decl = 0xff3c5761;
+luiscolor_macro    = 0xffcb4b16;
+luiscolor_function = 0xff6c71c4;
+luiscolor_type     = 0xffd33682;
+luiscolor_modal_cursor = 0xffdc322f;
+
+//defcolor_base_current_tab = 0xff000000;
+//defcolor_base_error_tab   = 0xff6c71c4;

@@ -76,7 +76,7 @@ CUSTOM_DOC("Default command for responding to a startup event")
       //Buffer_ID default_buffer_id = buffer_identifier_to_id(app, buffer_identifier(string_u8_litexpr("*scratch*")));
       Buffer_ID default_buffer_id = buffer_identifier_to_id(app, buffer_identifier(string_u8_litexpr("*messages*")));
       view_set_buffer(app, view, default_buffer_id, 0);
-      view_new_tab_group(app, view);
+      luis_new_tab_group(app);
       
       b32 auto_load = def_get_config_b32(vars_save_string_lit("automatically_load_project"));
       if (auto_load){
