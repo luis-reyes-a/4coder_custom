@@ -47,11 +47,11 @@ luis_offset_tab(Application_Links *app, i32 offset)
 
 CUSTOM_COMMAND_SIG(luis_tab_prev)
 CUSTOM_DOC("move prev tab")
-{	luis_offset_tab(app, -1)	}
+{	luis_offset_tab(app, -1);	}
 
 CUSTOM_COMMAND_SIG(luis_tab_next)
 CUSTOM_DOC("move next tab")
-{	luis_offset_tab(app, 1)	}
+{	luis_offset_tab(app, 1);	}
    
 
 internal void 
@@ -107,7 +107,8 @@ luis_offset_code_index(Application_Links *app, i32 offset)
    if(state->index != new_index)
    {
       Code_Index_Note *note = 0;
-      for(Code_Index_Note *n = first_note_in_hash; n; n = n->next_in_hash)
+      i32 current_index = 0;
+      for(Code_Index_Note *n = state->first_note; n; n = n->next_in_hash)
       {
          if(string_match(n->text, identifier))
          {
@@ -149,7 +150,7 @@ CUSTOM_COMMAND_SIG(luis_home)
 CUSTOM_DOC("go start of visual line")
 {
    View_ID view = get_active_view(app, Access_Always);
-   i64 linenum = get_line_number_from_pos(app, view_get_buffer(app, view, Access_Always), view_get_cursor_pos(app));
+   i64 linenum = get_line_number_from_pos(app, view_get_buffer(app, view, Access_Always), view_get_cursor_pos(app, view));
    Range_i64 range = get_visual_line_start_end_pos(app, view, linenum);
    view_set_cursor_and_preferred_x(app, view, seek_pos(range.min));
 }
@@ -158,7 +159,7 @@ CUSTOM_COMMAND_SIG(luis_end)
 CUSTOM_DOC("go end of visual line")
 {
    View_ID view = get_active_view(app, Access_Always);
-   i64 linenum = get_line_number_from_pos(app, view_get_buffer(app, view, Access_Always), view_get_cursor_pos(app));
+   i64 linenum = get_line_number_from_pos(app, view_get_buffer(app, view, Access_Always), view_get_cursor_pos(app, view));
    Range_i64 range = get_visual_line_start_end_pos(app, view, linenum);
    view_set_cursor_and_preferred_x(app, view, seek_pos(range.max));
 }
@@ -192,8 +193,7 @@ CUSTOM_DOC("build")
 {
    //TODO
 }
-luis_fsearch //fuck me
-luis_rsearch //fuck me
+
 
 CUSTOM_COMMAND_SIG(luis_left_word)
 CUSTOM_DOC("move left")
@@ -306,6 +306,7 @@ CUSTOM_DOC("surrounds in ()")
 CUSTOM_COMMAND_SIG(luis_scope_braces)
 CUSTOM_DOC("writes {}")
 {
+   #if 0
    //write_text(app, SCu8("\n{\n\n}"));
    View_ID view = get_active_view(app, Access_ReadWriteVisible);
    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
@@ -349,4 +350,219 @@ CUSTOM_DOC("writes {}")
    move_vertical_lines(app, 2);
    auto_indent_line_at_cursor(app);
    history_group_end(hgroup);
+   #endif
+}
+
+internal void
+luis_isearch(Application_Links *app, Scan_Direction start_scan, i64 first_pos, String_Const_u8 query_init)
+{
+   View_ID view = get_active_view(app, Access_ReadVisible);
+   Buffer_ID buffer = view_get_buffer(app, view, Access_ReadVisible);
+   i64 buffer_size = buffer_get_size(app, buffer);
+   if(buffer_size == 0)	return;
+   
+   
+   
+   Query_Bar_Group group(app);
+   Query_Bar bar = {};
+   if(!start_query_bar(app, &bar, 0))	return;
+   
+   Vec2_f32 old_margin = {};
+   Vec2_f32 old_push_in = {};
+   view_get_camera_bounds(app, view, &old_margin, &old_push_in);
+   
+   Vec2_f32 margin = old_margin;
+   margin.y = clamp_bot(200.f, margin.y);
+   view_set_camera_bounds(app, view, margin, old_push_in);
+   
+   Scan_Direction scan = start_scan;
+   i64 pos = first_pos;
+   
+   u8 bar_string_space[256];
+   bar.string = SCu8(bar_string_space, query_init.size);
+   block_copy(bar.string.str, query_init.str, query_init.size);
+   u64 match_size = bar.string.size;
+   
+   #define BAR_APPEND_STRING(string__) \
+   do \
+   { \
+      String_Const_u8 string = (string__); \
+      String_u8 bar_string = Su8(bar.string, sizeof(bar_string_space)); \
+      string_append(&bar_string, string); \
+      bar.string = bar_string.string; \
+      string_change = true; \
+   } while(0)
+   
+   b32 move_to_new_pos_and_save_search_string = false;
+   User_Input in = {};
+   for (;;)
+   {
+      bar.prompt = (scan == Scan_Forward) ? string_u8_litexpr("I-Search: ") : string_u8_litexpr("Reverse-I-Search: ");
+      isearch__update_highlight(app, view, Ii64_size(pos, match_size));
+      
+      in = get_next_input(app, EventPropertyGroup_Any, EventProperty_Escape);
+      if (in.abort)	break;
+      
+      b32 string_change = false;
+      b32 do_scan_action = false;
+      b32 do_scroll_wheel = false;
+      Scan_Direction change_scan = scan;
+      if(in.event.kind == InputEventKind_KeyStroke)
+      {
+         Key_Code code = in.event.key.code;
+         b32 ctrl_down = has_modifier(&in.event.key.modifiers, KeyCode_Control);
+         
+         if(code == KeyCode_Return || code == KeyCode_Tab)
+         {
+            if(ctrl_down) //append previous search string
+            {
+               bar.string.size = cstring_length(previous_isearch_query);
+               block_copy(bar.string.str, previous_isearch_query, bar.string.size);
+            }
+            else
+            {
+               u64 size = bar.string.size;
+               size = clamp_top(size, sizeof(previous_isearch_query) - 1);
+               block_copy(previous_isearch_query, bar.string.str, size);
+               previous_isearch_query[size] = 0;
+               move_to_new_pos_and_save_search_string = true;
+               break;
+            }
+         }
+         else if(code == KeyCode_Backspace)
+         {
+            if(ctrl_down)
+            {
+               if (bar.string.size > 0){
+                  string_change = true;
+                  bar.string.size = 0;
+               }
+            }
+            else
+            {
+               u64 old_bar_string_size = bar.string.size;
+               bar.string = backspace_utf8(bar.string);
+               string_change = (bar.string.size < old_bar_string_size);
+            }
+         }
+         else
+         {
+            View_Context ctx = view_current_context(app, view);
+            Mapping *mapping = ctx.mapping;
+            Command_Map *map = mapping_get_map(mapping, ctx.map_id);
+            Command_Binding binding = map_get_binding_recursive(mapping, map, &in.event);
+            if (binding.custom != 0)
+            {
+               if (binding.custom == luis_fsearch)
+               {
+                  change_scan = Scan_Forward;
+                  do_scan_action = true;
+               }
+               else if (binding.custom == luis_rsearch)
+               {
+                  change_scan = Scan_Backward;
+                  do_scan_action = true;
+               }
+               else if (binding.custom == luis_write_underscore)
+                  BAR_APPEND_STRING(SCu8("_"));
+               else if (binding.custom == luis_write_pointer_arrow)
+                  BAR_APPEND_STRING(SCu8("->"));
+               else
+               {
+                  Command_Metadata *metadata = get_command_metadata(binding.custom);
+                  if (metadata != 0){
+                     if (metadata->is_ui){
+                        view_enqueue_command_function(app, view, binding.custom);
+                        break;
+                     }
+                  }
+                  binding.custom(app);
+               }
+            }
+            else	leave_current_input_unhandled(app);
+         }
+            
+      }
+      else if(in.event.kind == InputEventKind_TextInsert)
+         BAR_APPEND_STRING(to_writable(&in));
+      
+      if (string_change){
+         switch (scan){
+            case Scan_Forward:
+            {
+               i64 new_pos = 0;
+               seek_string_insensitive_forward(app, buffer, pos - 1, 0, bar.string, &new_pos);
+               if (new_pos < buffer_size){
+                  pos = new_pos;
+                  match_size = bar.string.size;
+               }
+            }break;
+            
+            case Scan_Backward:
+            {
+               i64 new_pos = 0;
+               seek_string_insensitive_backward(app, buffer, pos + 1, 0, bar.string, &new_pos);
+               if (new_pos >= 0){
+                  pos = new_pos;
+                  match_size = bar.string.size;
+               }
+            }break;
+         }
+      }
+      else if (do_scan_action){
+         scan = change_scan;
+         switch (scan){
+            case Scan_Forward:
+            {
+               i64 new_pos = 0;
+               seek_string_insensitive_forward(app, buffer, pos, 0, bar.string, &new_pos);
+               if (new_pos < buffer_size){
+                  pos = new_pos;
+                  match_size = bar.string.size;
+               }
+            }break;
+            
+            case Scan_Backward:
+            {
+               i64 new_pos = 0;
+               seek_string_insensitive_backward(app, buffer, pos, 0, bar.string, &new_pos);
+               if (new_pos >= 0){
+                  pos = new_pos;
+                  match_size = bar.string.size;
+               }
+            }break;
+         }
+      }
+      else if (do_scroll_wheel){
+         mouse_wheel_scroll(app);
+      }
+   }
+   
+   view_disable_highlight_range(app, view);
+   
+   if (move_to_new_pos_and_save_search_string)
+   {
+      u64 size = bar.string.size;
+      size = clamp_top(size, sizeof(previous_isearch_query) - 1);
+      block_copy(previous_isearch_query, bar.string.str, size);
+      previous_isearch_query[size] = 0;
+      view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+   }
+   else view_set_cursor_and_preferred_x(app, view, seek_pos(first_pos));
+   
+   view_set_camera_bounds(app, view, old_margin, old_push_in);
+}
+
+CUSTOM_COMMAND_SIG(luis_fsearch)
+CUSTOM_DOC("search forwards")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   isearch(app, Scan_Forward, view_get_cursor_pos(app, view), SCu8());
+}
+
+CUSTOM_COMMAND_SIG(luis_rsearch)
+CUSTOM_DOC("search backwards")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   isearch(app, Scan_Backward, view_get_cursor_pos(app, view), SCu8());
 }
