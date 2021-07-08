@@ -23,8 +23,10 @@ CUSTOM_ID(colors, luiscolor_type);
 CUSTOM_ID(colors, luiscolor_macro);
 CUSTOM_ID(colors, luiscolor_function);
 CUSTOM_ID(colors, luiscolor_variable_decl);
+CUSTOM_ID(colors, luiscolor_modal_cursor);
 global b32 IN_MODAL_MODE;
 global b32 SHOW_BRACE_LINE_ANNOTATIONS;
+global b32 MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION;
 global Face_ID SMALL_CODE_FACE;
 global Face_ID ITALICS_CODE_FACE;
 global Face_ID BOLD_CODE_FACE;
@@ -40,7 +42,9 @@ enum Custom_View_Flags
    VIEW_IS_PEEK_WINDOW        = (1 << 0),
    VIEW_NOTEPAD_MODE_MARK_SET = (1 << 1),
    VIEW_ADD_NEW_BUFFER_AS_NEW_TAB = (1 << 2), //otherwise we overwrite current_tab
+   //VIEW_KILL_TAB_GROUP_ON_VIEW_CLOSE = (1 << 3), //search in luis_hooks.cpp if you want this behaviour
 };
+
 
 //NOTE(luis) you can build panel layouts into this and just store a global current_workspace
 //but I tend to just prefer to have one panel open, so I wouldn't get much out of it
@@ -51,8 +55,9 @@ struct Buffer_Tab_Group
    i32 current_tab;
 };
 
+global i32 BUFFER_TAB_GROUP_COMPILATION = -1; //tab group for the view with *compilation*
+global i32 BUFFER_TAB_GROUP_COMPILATION_SCRATCH = -1; //scratch group we make when iterating through compile errors
 global i32 BUFFER_TAB_GROUP_COUNT;
-global i32 COMPILE_BUFFER_TAB = -1;
 global Buffer_Tab_Group BUFFER_TAB_GROUPS[12]; //NOTE must always be greater than 2
 
 function b32
@@ -181,14 +186,15 @@ luis_get_or_split_peek_window(Application_Links *app, View_ID view, View_Split_P
    View_ID peek = luis_get_peek_window(app, view);
    if(!peek)
    {
+      MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION = true;
       peek = open_view(app, view, split_kind);
       if(peek)
       {
          luis_view_set_flags(app, peek, VIEW_IS_PEEK_WINDOW);
          Rect_f32 view_rect = view_get_screen_rect(app, view);
-         view_set_split_pixel_size(app, peek, (i32)((view_rect.y1 - view_rect.y0)*0.25f));    
+         view_set_split_pixel_size(app, peek, (i32)((view_rect.y1 - view_rect.y0)*0.4f));    
       }
-      
+      else MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION = false; //open view failed, remove this "argument"
    }
    return peek;
 }
@@ -595,7 +601,93 @@ mkstr(String_Builder *builder)
    return result;
 }
 
+//returns newly made tab group_index
+internal i32
+view_new_tab_group(Application_Links *app, View_ID view)
+{
+   i32 tab_group_index_result = -1;
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+   if(tab_group_index && BUFFER_TAB_GROUP_COUNT < countof(BUFFER_TAB_GROUPS))
+   {
+      foreach_index_inc(i, countof(BUFFER_TAB_GROUPS))
+      {
+         Buffer_Tab_Group *group = BUFFER_TAB_GROUPS + i; 
+         if(group->tab_count == 0)
+         {
+            tab_group_index_result = i;
+            *tab_group_index = i;
+            *group = {};
+            group->tabs[0] = view_get_buffer(app, view, Access_Always);
+            group->tab_count = 1;
+            BUFFER_TAB_GROUP_COUNT += 1;
+            break;
+         }
+      }
+   }   
+   return tab_group_index_result;
+}
 
+internal i32
+view_get_tab_group_index(Application_Links *app, View_ID view)
+{
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+   if(tab_group_index) return *tab_group_index;
+   else return -1;
+}
 
+internal b32
+is_valid_tab_group_index(i32 tab_group_index)
+{
+   b32 result = tab_group_index >= 0 && tab_group_index < countof(BUFFER_TAB_GROUPS); 
+   return result;
+}
 
+internal void
+kill_tab_group(Application_Links *app, i32 tab_group_index)
+{
+   if(!is_valid_tab_group_index(tab_group_index))	return;
+   
+   b32 do_kill = false;
+   if(tab_group_index == BUFFER_TAB_GROUP_COMPILATION || tab_group_index == BUFFER_TAB_GROUP_COMPILATION_SCRATCH)
+      do_kill = true;
+   else
+   {
+      b32 num_regular_tab_groups = BUFFER_TAB_GROUP_COUNT;
+      if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION))
+         num_regular_tab_groups -= 1;
+      if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH))
+         num_regular_tab_groups -= 1;
+      do_kill = num_regular_tab_groups > 1;
+   }
+   
+   if(do_kill)
+   {  
+      BUFFER_TAB_GROUPS[tab_group_index] = {};
+      BUFFER_TAB_GROUP_COUNT -= 1;
+      
+      i32 original_tab_group_index = tab_group_index;
+      i32 safe_group_index = 0;
+      foreach_index_inc(group_index, countof(BUFFER_TAB_GROUPS))
+      {
+         if(BUFFER_TAB_GROUPS[group_index].tab_count > 0)
+         {
+            safe_group_index = group_index;
+            break;
+         }
+      }
+      
+      //View_ID v = view;
+      //do
+      for(View_ID v = get_view_next(app, 0, Access_Always); v; v = get_view_next(app, v, Access_Always))
+      {
+         Managed_Scope s = view_get_managed_scope(app, v);
+         i32 *index = scope_attachment(app, s, view_tab_group_index, i32);
+         if(index && *index == original_tab_group_index)
+            *index = safe_group_index;
+         //v = get_next_view_looped_all_panels(app, v, Access_Always);
+      } //while(v != view);
+   }
+}
 #endif //LUIS_CUSTOM_LAYER_H

@@ -170,7 +170,16 @@ CUSTOM_DOC("Input consumption loop for default view behavior")
       
       ProfileCloseNow(view_input_profile);
       if(actually_do_command)
+      {
+         //b32 do_kill_tab_group = luis_view_has_flags(app, view, VIEW_KILL_TAB_GROUP_ON_VIEW_CLOSE);
+         //i32 tab_group_index = view_get_tab_group_index(app, view);
          map_result.command(app);
+         //if(!view_exists(app, view) && do_kill_tab_group) //pseudo-hook for when a view is being destroyed
+         //{
+            //kill_tab_group(app, tab_group_index);
+         //}
+      }
+         
       if(try_to_recover_peek_view_after_command)
       {
          Peek_Code_Index_State *state = scope_attachment(app, scope, view_code_peek_state, Peek_Code_Index_State);
@@ -208,7 +217,7 @@ CUSTOM_DOC("Input consumption loop for default view behavior")
                   cmd == luis_write_tab || cmd == luis_write_newline || cmd == write_text_and_auto_indent ||
                   cmd == auto_indent_line_at_cursor || cmd == auto_indent_whole_file || cmd == auto_indent_range ||
                   cmd == delete_range || cmd == luis_multiline_comment_toggle || cmd == place_in_scope || cmd == luis_surround_in_parens ||
-                  cmd == view_buffer_other_panel || cmd == if_read_only_goto_position || cmd == if_read_only_goto_position_same_panel)
+                  cmd == view_buffer_other_panel || cmd == if_read_only_goto_position || cmd == if_read_only_goto_position_same_panel || cmd == luis_escape)
                {
                   luis_view_clear_flags(app, view, VIEW_NOTEPAD_MODE_MARK_SET);
                   snap_mark_to_cursor = true;
@@ -743,7 +752,7 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
             //mark block and character over
             FColor cursor_color = fcolor_id(defcolor_cursor, cursor_sub_id);
             FColor mark_color   = fcolor_id(defcolor_mark);
-            if(IN_MODAL_MODE) cursor_color = fcolor_id(defcolor_highlight);//fcolor_id(defcolor_highlight);
+            if(IN_MODAL_MODE) cursor_color = fcolor_id(luiscolor_modal_cursor);//fcolor_id(defcolor_highlight);
             draw_character_block(app, text_layout_id, mark_pos, cursor_roundness, mark_color);
             draw_character_block(app, text_layout_id, cursor_pos, cursor_roundness, cursor_color);
             paint_text_color_pos(app, text_layout_id, cursor_pos,
@@ -956,13 +965,21 @@ luis_view_change_buffer(Application_Links *app, View_ID view_id,
       if(old_buffer_id == 0) //view creation, set it's default tab group
       {
          //since panels always open by splitting, we should always get a child view here...
-         View_ID prev_view = luis_get_other_child_view(app, view_id);
-         if(prev_view)
+         if(MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION)
          {
-            Managed_Scope prev_active_view_scope = view_get_managed_scope(app, prev_view);
-            i32 *prev_tab_group_index = scope_attachment(app, prev_active_view_scope, view_tab_group_index, i32);
-            if(prev_tab_group_index)
-               *tab_group_index = *prev_tab_group_index;
+            MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION = false;
+            view_new_tab_group(app, view_id);
+         }
+         else
+         {
+            View_ID prev_view = luis_get_other_child_view(app, view_id);
+            if(prev_view)
+            {
+               Managed_Scope prev_active_view_scope = view_get_managed_scope(app, prev_view);
+               i32 *prev_tab_group_index = scope_attachment(app, prev_active_view_scope, view_tab_group_index, i32);
+               if(prev_tab_group_index)
+                  *tab_group_index = *prev_tab_group_index;
+            }   
          }
       }
       if(*tab_group_index < 0 || *tab_group_index >= BUFFER_TAB_GROUP_COUNT)

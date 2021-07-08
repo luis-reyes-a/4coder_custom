@@ -1,25 +1,4 @@
-internal void
-view_new_tab_group(Application_Links *app, View_ID view)
-{
-   Managed_Scope scope = view_get_managed_scope(app, view);
-   i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
-   if(tab_group_index && BUFFER_TAB_GROUP_COUNT < countof(BUFFER_TAB_GROUPS))
-   {
-      foreach_index_inc(i, countof(BUFFER_TAB_GROUPS))
-      {
-         Buffer_Tab_Group *group = BUFFER_TAB_GROUPS + i; 
-         if(group->tab_count == 0)
-         {
-            *tab_group_index = i;
-            *group = {};
-            group->tabs[0] = view_get_buffer(app, view, Access_Always);
-            group->tab_count = 1;
-            BUFFER_TAB_GROUP_COUNT += 1;
-            return;
-         }
-      }
-   }   
-}
+
 
 CUSTOM_COMMAND_SIG(luis_new_tab_group)
 CUSTOM_DOC("make a new tab group")
@@ -30,40 +9,7 @@ CUSTOM_DOC("make a new tab group")
 
 CUSTOM_COMMAND_SIG(luis_kill_tab_group)
 CUSTOM_DOC("kill current tab group")
-{
-   if(BUFFER_TAB_GROUP_COUNT > 1)
-   {
-      View_ID view = get_active_view(app, Access_Always);
-      Managed_Scope scope = view_get_managed_scope(app, view);
-      i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
-      if(tab_group_index)
-      {
-         BUFFER_TAB_GROUPS[*tab_group_index] = {};
-         BUFFER_TAB_GROUP_COUNT -= 1;
-         
-         i32 original_tab_group_index = *tab_group_index;
-         i32 safe_group_index = 0;
-         foreach_index_inc(group_index, countof(BUFFER_TAB_GROUPS))
-         {
-            if(BUFFER_TAB_GROUPS[group_index].tab_count > 0)
-            {
-               safe_group_index = group_index;
-               break;
-            }
-         }
-         
-         View_ID v = view;
-         do 
-         {
-            Managed_Scope s = view_get_managed_scope(app, v);
-            i32 *index = scope_attachment(app, s, view_tab_group_index, i32);
-            if(index && *index == original_tab_group_index)
-               *index = safe_group_index;
-            v = get_next_view_looped_all_panels(app, v, Access_Always);
-         } while(v != view);
-      }
-   }
-}
+{	kill_tab_group(app, view_get_tab_group_index(app, get_active_view(app, Access_Always)));	}
 
 CUSTOM_COMMAND_SIG(luis_tab_group_lister)
 CUSTOM_DOC("switch to new tab group")
@@ -176,6 +122,12 @@ CUSTOM_DOC("Toggles modal mode")
    update_buffer_bindings_for_modal_toggling(app, buffer_id);
 }
 
+CUSTOM_COMMAND_SIG(luis_escape)
+CUSTOM_DOC("escape key")
+{
+   //does nothing, hanlded by view_input_handler
+}
+
 internal void
 luis_offset_code_index(Application_Links *app, i32 offset)
 {
@@ -210,12 +162,12 @@ luis_offset_code_index(Application_Links *app, i32 offset)
          View_ID peek = luis_get_or_split_peek_window(app, view, ViewSplit_Bottom);
          if(peek)
          {
-            view_set_buffer(app, peek, note->file->buffer, 0); 
-            view_new_tab_group(app, peek);
-            luis_view_set_flags(app, peek, VIEW_IS_PEEK_WINDOW);
+            view_set_active(app, peek);
+            view_set_buffer(app, peek, note->file->buffer, 0);
+            view_set_cursor_and_preferred_x(app, peek, seek_pos(note->pos.first));
+            luis_center_view_top(app);
             state->index = new_index;   
          }
-         
       }
    }
 }
@@ -277,9 +229,94 @@ CUSTOM_DOC("go end of visual line")
 CUSTOM_COMMAND_SIG(luis_build)
 CUSTOM_DOC("build")
 {
-   //TODO
+   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION))
+      kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION);
+   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH))
+      kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION_SCRATCH);
+   
+   View_ID view = get_active_view(app, Access_Always);
+   Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+   
+   View_ID build_view = luis_get_or_split_peek_window(app, view, ViewSplit_Bottom);
+   if(build_view)
+   {
+      standard_search_and_build(app, build_view, buffer);
+      set_fancy_compilation_buffer_font(app);
+      
+      block_zero_struct(&prev_location);
+      lock_jump_buffer(app, string_u8_litexpr("*compilation*"));
+      
+      view_new_tab_group(app, view);
+      BUFFER_TAB_GROUP_COMPILATION_SCRATCH = view_get_tab_group_index(app, view);
+      BUFFER_TAB_GROUP_COMPILATION = view_get_tab_group_index(app, build_view);
+   }
 }
 
+//this is very complicated but it's behaviour that makes sense to me
+//first we try to close the "build panel"
+//if no build panel, then we try to close the peek panel
+//if no peek panel, we try to close a tab
+//if there was only one tab to begin with, we just close that main panel
+//NOTE(luis) calling close_panel() or close_build_panel() will most likely cause bugs
+CUSTOM_COMMAND_SIG(luis_close_tab_or_panel)
+CUSTOM_DOC("try to close something :)")
+{
+   b32 closed_build_view = false;
+   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION)) //*compile* tab group open
+   {
+      //find view with compilation tab group and close it
+      for(View_ID v = get_view_next(app, 0, Access_Always); v; v = get_view_next(app, v, Access_Always))
+      {
+         if(luis_view_has_flags(app, v, VIEW_IS_PEEK_WINDOW) && view_get_tab_group_index(app, v) == BUFFER_TAB_GROUP_COMPILATION)
+         {
+            view_close(app, v);
+            closed_build_view = true;
+         }
+      }
+      kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION);
+      BUFFER_TAB_GROUP_COMPILATION = -1;
+   }
+   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH)) //*compile* tab group open
+   {
+      kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION_SCRATCH);
+      BUFFER_TAB_GROUP_COMPILATION_SCRATCH = -1;
+   }
+   
+   if(!closed_build_view)
+   {
+      b32 close_panel_instead = false;
+      View_ID view = get_active_view(app, Access_Always);
+      View_ID peek = luis_get_peek_window(app, view);
+      if(peek)
+      {
+         kill_tab_group(app, view_get_tab_group_index(app, peek));
+         view_close(app, peek);
+      }
+      else //try to close a tab
+      {
+         Managed_Scope scope = view_get_managed_scope(app, view);
+         i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+         if(tab_group_index) 
+         {
+            Buffer_Tab_Group *group = BUFFER_TAB_GROUPS + *tab_group_index;
+            if(group->tab_count > 1)
+            {
+               for(i32 i = group->current_tab; i < (group->tab_count - 1); i += 1)
+                  group->tabs[i] = group->tabs[i+1];
+               group->tab_count -= 1;
+               
+               if(group->current_tab >= group->tab_count)
+                  group->current_tab = group->tab_count - 1;
+            }
+            else close_panel_instead = true;
+         }
+         else close_panel_instead = true;   
+      }
+      
+      if(close_panel_instead)
+         view_close(app, view);
+   }  
+}
 
 CUSTOM_COMMAND_SIG(luis_left_word)
 CUSTOM_DOC("move left")
