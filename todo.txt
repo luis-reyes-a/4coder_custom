@@ -1,0 +1,5 @@
+[x] fix peek window, currently it changes previous view's current tab
+[x] implement close_tab_or_panel
+[x] show buffer code notes
+[] mouse rearrange tabs
+[] new_tab inserts to right of current tab

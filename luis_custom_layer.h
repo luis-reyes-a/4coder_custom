@@ -192,7 +192,8 @@ luis_get_or_split_peek_window(Application_Links *app, View_ID view, View_Split_P
       {
          luis_view_set_flags(app, peek, VIEW_IS_PEEK_WINDOW);
          Rect_f32 view_rect = view_get_screen_rect(app, view);
-         view_set_split_pixel_size(app, peek, (i32)((view_rect.y1 - view_rect.y0)*0.4f));    
+         //view_set_split_pixel_size(app, peek, (i32)((view_rect.y1 - view_rect.y0)*0.4f));
+         view_set_split(app, peek, ViewSplitKind_Ratio, 1.0f / 3);
       }
       else MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION = false; //open view failed, remove this "argument"
    }
@@ -626,6 +627,17 @@ view_new_tab_group(Application_Links *app, View_ID view)
       }
    }   
    return tab_group_index_result;
+}
+
+internal Buffer_Tab_Group *
+view_get_tab_group(Application_Links *app, View_ID view)
+{
+   Buffer_Tab_Group *group = 0;
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+   if(tab_group_index && *tab_group_index >= 0 && *tab_group_index < countof(BUFFER_TAB_GROUPS))
+      group = BUFFER_TAB_GROUPS + *tab_group_index;
+   return group;
 }
 
 internal i32

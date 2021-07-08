@@ -54,8 +54,26 @@ CUSTOM_DOC("switch to new tab group")
 CUSTOM_COMMAND_SIG(luis_new_tab)
 CUSTOM_DOC("make a new tab group")
 {
-   luis_view_set_flags(app, get_active_view(app, Access_Always), VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
-   interactive_open_or_new(app);
+   View_ID view = get_active_view(app, Access_Always);
+   if(luis_view_has_flags(app, view, VIEW_IS_PEEK_WINDOW))
+   {
+      Buffer_ID buffer_id = view_get_buffer(app, view, Access_Always);
+      View_ID parent = luis_get_peek_windows_parent_view(app, view);
+      if(parent)
+      {
+         kill_tab_group(app, view_get_tab_group_index(app, view));
+         view_close(app, view);
+         
+         luis_view_set_flags(app, parent, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+         view_set_buffer(app, parent, buffer_id, 0);
+      }
+      //else //something weird happend
+   }
+   else
+   {
+      luis_view_set_flags(app, view, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+      interactive_open_or_new(app);   
+   }
 }
 
 internal void
@@ -426,10 +444,24 @@ CUSTOM_DOC("surrounds in ()")
    history_group_end(group);
 }
 
+internal b32
+strmatch_so_far(String_Const_u8 a, String_Const_u8 b, i32 count)
+{
+   if(a.size >= count && b.size >= count)
+   {
+      for(i32 i = 0; i < count; i += 1)
+      {
+         if(a.str[i] != b.str[i])	return false;
+      }
+      return true;
+   }
+   else return false;  
+}
+
 CUSTOM_COMMAND_SIG(luis_scope_braces)
 CUSTOM_DOC("writes {}")
 {
-   #if 0
+   #if 1
    //write_text(app, SCu8("\n{\n\n}"));
    View_ID view = get_active_view(app, Access_ReadWriteVisible);
    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
@@ -444,18 +476,13 @@ CUSTOM_DOC("writes {}")
    //NOTE I check for space after the keyword to ensure it's not a substring of a bigger word
    //this will miss if there's a newline right after it. The more correct way of doing this is with tokens
    String_Const_u8 string = {}; 
-   if(strmatch(SCu8("struct "), line, 7) ||
-      strmatch(SCu8("enum "),   line, 5) ||
-      strmatch(SCu8("union "),  line, 6))
+   if(strmatch_so_far(SCu8("struct "), line, 7) ||
+      strmatch_so_far(SCu8("enum "),   line, 5) ||
+      strmatch_so_far(SCu8("union "),  line, 6))
    {
       string.str = (u8 *)"\n{\n\n};";
       string.size = sizeof("\n{\n\n};") - 1;
    }
-   //else if(strmatch(SCu8("case "), line, 5))
-   //{
-   //string.str = (u8 *)":\n{\n\n} break;";
-   //string.size = sizeof(":\n{\n\n} break;") - 1;
-   //}
    else if(line.size == 0)
    {
       string.str = (u8 *)"{\n\n}";
@@ -688,4 +715,427 @@ CUSTOM_DOC("search backwards")
 {
    View_ID view = get_active_view(app, Access_Always);
    luis_isearch(app, Scan_Backward, view_get_cursor_pos(app, view), SCu8());
+}
+
+CUSTOM_COMMAND_SIG(luis_list_exact_matches_of_identifier)
+CUSTOM_DOC("find matches of identifier under cursor")
+{
+   Scratch_Block scratch(app);
+   String_Const_u8 needle = push_token_or_word_under_active_cursor(app, scratch);
+   if(needle.size > 0)
+   {
+      View_ID peek = luis_get_or_split_peek_window(app, get_active_view(app, Access_Always), ViewSplit_Bottom);
+      if(peek)
+      {
+         String_Const_u8_Array search_array = {&needle, 1};
+         String_Match_Flag must_have_flags = 0;
+         AddFlag(must_have_flags, StringMatch_CaseSensitive);
+         String_Match_Flag must_not_have_flags = 0;
+         //AddFlag(must_not_have_flags, StringMatch_LeftSideSloppy);
+         //AddFlag(must_not_have_flags, StringMatch_RightSideSloppy);
+         Buffer_ID search_buffer = create_or_switch_to_buffer_and_clear_by_name(app, search_name, peek);
+         print_all_matches_all_buffers(app, search_array, must_have_flags, must_not_have_flags, search_buffer);
+      }
+   }
+}
+
+CUSTOM_COMMAND_SIG(luis_toggle_matching_cpp)
+CUSTOM_DOC("If the current file is a *.cpp or *.h, attempts to open the corresponding *.h or *.cpp file in the other view.")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   Buffer_Tab_Group *group = view_get_tab_group(app, view);
+   if(group)
+   {
+      Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+      Buffer_ID new_buffer = 0;
+      if(get_cpp_matching_file(app, buffer, &new_buffer))
+         group->tabs[group->current_tab] = new_buffer;
+   }
+}
+
+
+function Lister_Result
+luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index = 0)
+{
+   lister->filter_restore_point = begin_temp(lister->arena);
+   lister_update_filtered_list(app, lister);
+   
+   View_ID view = get_this_ctx_view(app, Access_Always);
+   View_Context ctx = view_current_context(app, view);
+   ctx.render_caller = lister_render;
+   ctx.hides_buffer = true;
+   View_Context_Block ctx_block(app, view, &ctx);
+   
+   if (lister->handlers.navigate && best_starting_index > 0)
+      lister->handlers.navigate(app, view, lister, best_starting_index);
+   
+   for (;;){
+      User_Input in = get_next_input(app, EventPropertyGroup_Any, EventProperty_Escape);
+      if (in.abort){
+         block_zero_struct(&lister->out);
+         lister->out.canceled = true;
+         break;
+      }
+      
+      Lister_Activation_Code result = ListerActivation_Continue;
+      b32 handled = true;
+      switch (in.event.kind){
+         case InputEventKind_TextInsert:
+         {
+            if (lister->handlers.write_character != 0){
+               result = lister->handlers.write_character(app);
+            }
+         }break;
+         
+         case InputEventKind_KeyStroke:
+         {
+            switch (in.event.key.code){
+               case KeyCode_Return:
+               case KeyCode_Tab:
+               {
+                  void *user_data = 0;
+                  if (0 <= lister->raw_item_index &&
+                      lister->raw_item_index < lister->options.count){
+                     user_data = lister_get_user_data(lister, lister->raw_item_index);
+                  }
+                  lister_activate(app, lister, user_data, false);
+                  result = ListerActivation_Finished;
+               }break;
+               
+               case KeyCode_Backspace:
+               {
+                  if (lister->handlers.backspace != 0){
+                     lister->handlers.backspace(app);
+                  }
+                  else if (lister->handlers.key_stroke != 0){
+                     result = lister->handlers.key_stroke(app);
+                  }
+                  else{
+                     handled = false;
+                  }
+               }break;
+               
+               case KeyCode_Up:
+               {
+                  if (lister->handlers.navigate != 0){
+                     lister->handlers.navigate(app, view, lister, -1);
+                  }
+                  else if (lister->handlers.key_stroke != 0){
+                     result = lister->handlers.key_stroke(app);
+                  }
+                  else{
+                     handled = false;
+                  }
+               }break;
+               
+               case KeyCode_Down:
+               {
+                  if (lister->handlers.navigate != 0){
+                     lister->handlers.navigate(app, view, lister, 1);
+                  }
+                  else if (lister->handlers.key_stroke != 0){
+                     result = lister->handlers.key_stroke(app);
+                  }
+                  else{
+                     handled = false;
+                  }
+               }break;
+               
+               case KeyCode_PageUp:
+               {
+                  if (lister->handlers.navigate != 0){
+                     lister->handlers.navigate(app, view, lister,
+                                               -lister->visible_count);
+                  }
+                  else if (lister->handlers.key_stroke != 0){
+                     result = lister->handlers.key_stroke(app);
+                  }
+                  else{
+                     handled = false;
+                  }
+               }break;
+               
+               case KeyCode_PageDown:
+               {
+                  if (lister->handlers.navigate != 0){
+                     lister->handlers.navigate(app, view, lister,
+                                               lister->visible_count);
+                  }
+                  else if (lister->handlers.key_stroke != 0){
+                     result = lister->handlers.key_stroke(app);
+                  }
+                  else{
+                     handled = false;
+                  }
+               }break;
+               
+               default:
+               {
+                  if (lister->handlers.key_stroke != 0){
+                     result = lister->handlers.key_stroke(app);
+                  }
+                  else{
+                     handled = false;
+                  }
+               }break;
+            }
+         }break;
+         
+         case InputEventKind_MouseButton:
+         {
+            switch (in.event.mouse.code){
+               case MouseCode_Left:
+               {
+                  Vec2_f32 p = V2f32(in.event.mouse.p);
+                  void *clicked = lister_user_data_at_p(app, view, lister, p);
+                  lister->hot_user_data = clicked;
+               }break;
+               
+               default:
+               {
+                  handled = false;
+               }break;
+            }
+         }break;
+         
+         case InputEventKind_MouseButtonRelease:
+         {
+            switch (in.event.mouse.code){
+               case MouseCode_Left:
+               {
+                  if (lister->hot_user_data != 0){
+                     Vec2_f32 p = V2f32(in.event.mouse.p);
+                     void *clicked = lister_user_data_at_p(app, view, lister, p);
+                     if (lister->hot_user_data == clicked){
+                        lister_activate(app, lister, clicked, true);
+                        result = ListerActivation_Finished;
+                     }
+                  }
+                  lister->hot_user_data = 0;
+               }break;
+               
+               default:
+               {
+                  handled = false;
+               }break;
+            }
+         }break;
+         
+         case InputEventKind_MouseWheel:
+         {
+            Mouse_State mouse = get_mouse_state(app);
+            lister->scroll.target.y += mouse.wheel;
+            lister_update_filtered_list(app, lister);
+         }break;
+         
+         case InputEventKind_MouseMove:
+         {
+            lister_update_filtered_list(app, lister);
+         }break;
+         
+         case InputEventKind_Core:
+         {
+            switch (in.event.core.code){
+               case CoreCode_Animate:
+               {
+                  lister_update_filtered_list(app, lister);
+               }break;
+               
+               default:
+               {
+                  handled = false;
+               }break;
+            }
+         }break;
+         
+         default:
+         {
+            handled = false;
+         }break;
+      }
+      
+      if (result == ListerActivation_Finished){
+         break;
+      }
+      
+      if (!handled){
+         Mapping *mapping = lister->mapping;
+         Command_Map *map = lister->map;
+         
+         Fallback_Dispatch_Result disp_result =
+            fallback_command_dispatch(app, mapping, map, &in);
+         if (disp_result.code == FallbackDispatch_DelayedUICall){
+            call_after_ctx_shutdown(app, view, disp_result.func);
+            break;
+         }
+         if (disp_result.code == FallbackDispatch_Unhandled){
+            leave_current_input_unhandled(app);
+         }
+         else{
+            lister_call_refresh_handler(app, lister);
+         }
+      }
+   }
+   
+   return(lister->out);
+}
+
+CUSTOM_COMMAND_SIG(luis_show_buffer_code_notes)
+CUSTOM_DOC("show all the code notes found for this buffer")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   Buffer_ID buffer_id = view_get_buffer(app, view, Access_Always);
+   i64 pos = view_get_cursor_pos(app, view);
+   //i64 linenum = get_line_number_from_pos(app, buffer_id, pos);
+   
+   Scratch_Block scratch(app);
+   Lister_Block lister(app, scratch);
+   lister_set_query(lister, SCu8("Index: "));
+   lister_set_default_handlers(lister);
+   
+   i32 best_starting_index = 0;
+   i64 smallest_diff = max_i64;
+   Code_Index_File *file = code_index_get_file(buffer_id);
+   if(file)
+   {
+      for(i32 i = 0; i < file->note_array.count; i += 1)
+      {
+         Code_Index_Note *note = file->note_array.ptrs[i];
+         i64 diff = abs(note->pos.first - pos); 
+         if(diff < smallest_diff)
+         {
+            smallest_diff = diff;
+            best_starting_index = lister.lister.current->options.count;
+         }
+         
+         if(!note->parent) //only add top level notes
+         {
+            String_Const_u8 status = push_buffer_line(app, scratch, buffer_id, get_line_number_from_pos(app, buffer_id, note->pos.min));
+            lister_add_item(lister, note->text, status, (void*)note, 0);   
+         }
+         
+      }
+      
+      //lister.lister.current->item_index = best_starting_index; //NOTE set item_index, with clamping and whatever
+      //lister.lister.current->set_vertical_focus_to_item = true;
+      //lister_update_selection_values(lister.lister.current);
+      
+      Lister_Result l_result = luis_run_lister(app, lister, best_starting_index);
+      if (!l_result.canceled)
+      {
+         Code_Index_Note *note = (Code_Index_Note *)l_result.user_data;
+         view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
+         luis_center_view_top(app);
+      }
+   }
+}
+
+internal void
+show_buffer_code_notes_all_buffers(Application_Links *app, b32 show_functions, b32 show_types, b32 show_macros)
+{
+   //View_ID view = get_active_view(app, Access_Always);
+   //Buffer_ID buffer_id = view_get_buffer(app, view, Access_Always);
+   
+   Scratch_Block scratch(app);
+   Lister_Block lister(app, scratch);
+   lister_set_query(lister, SCu8("Index: "));
+   lister_set_default_handlers(lister);
+   
+   for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
+        buffer != 0;
+        buffer = get_buffer_next(app, buffer, Access_Always))
+   {
+      Code_Index_File *file = code_index_get_file(buffer);
+      if(!file) continue;
+      
+      for(i32 i = 0; i < file->note_array.count; i += 1)
+      {
+         Code_Index_Note *note = file->note_array.ptrs[i];
+         if(!note->parent) //only add top level notes
+         {
+            if((note->note_kind == CodeIndexNote_Function && show_functions) ||
+               (note->note_kind == CodeIndexNote_Type     && show_types) ||
+               (note->note_kind == CodeIndexNote_Macro    && show_macros))
+            {
+               String_Const_u8 status = push_buffer_line(app, scratch, note->file->buffer, get_line_number_from_pos(app, note->file->buffer, note->pos.min));
+               lister_add_item(lister, note->text, status, (void*)note, 0);   
+            }
+            
+         }
+      }
+   }
+   
+   Lister_Result l_result = luis_run_lister(app, lister);
+   if (!l_result.canceled)
+   {
+      Code_Index_Note *note = (Code_Index_Note *)l_result.user_data;
+      View_ID view = get_active_view(app, Access_Always);
+      view_set_buffer(app, view, note->file->buffer, 0);
+      view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
+      luis_center_view_top(app);
+   }
+}
+
+CUSTOM_COMMAND_SIG(luis_show_functions)
+CUSTOM_DOC("show all functions")
+{
+   b32 show_functions = true;
+   b32 show_types     = false;
+   b32 show_macros    = false;
+   show_buffer_code_notes_all_buffers(app, show_functions, show_types, show_macros);
+}
+
+CUSTOM_COMMAND_SIG(luis_show_types)
+CUSTOM_DOC("show all types")
+{
+   b32 show_functions = false;
+   b32 show_types     = true;
+   b32 show_macros    = false;
+   show_buffer_code_notes_all_buffers(app, show_functions, show_types, show_macros);
+}
+
+CUSTOM_COMMAND_SIG(luis_show_all)
+CUSTOM_DOC("show all codes notes")
+{
+   show_buffer_code_notes_all_buffers(app, true, true, true);
+}
+
+
+
+function void
+luis_select_scope(Application_Links *app, View_ID view, Range_i64 range){
+   view_set_cursor_and_preferred_x(app, view, seek_pos(range.first));
+   luis_set_mark(app, view, range.end);
+   view_look_at_region(app, view, range.first, range.end);
+   no_mark_snap_to_cursor(app, view);
+}
+
+CUSTOM_COMMAND_SIG(luis_select_surrounding_scope)
+CUSTOM_DOC("select surrounding scope")
+{
+   View_ID view = get_active_view(app, Access_ReadVisible);
+   Buffer_ID buffer = view_get_buffer(app, view, Access_ReadVisible);
+   i64 pos = view_get_cursor_pos(app, view);
+   Range_i64 range = {};
+   if (find_surrounding_nest(app, buffer, pos, FindNest_Scope, &range)){
+      luis_select_scope(app, view, range);
+   }
+}
+
+CUSTOM_COMMAND_SIG(luis_select_surrounding_scope_maximal)
+CUSTOM_DOC("select surrounding scope")
+{
+   View_ID view = get_active_view(app, Access_ReadVisible);
+   Buffer_ID buffer = view_get_buffer(app, view, Access_ReadVisible);
+   i64 pos = view_get_cursor_pos(app, view);
+   Range_i64 range = {};
+   if (find_surrounding_nest(app, buffer, pos, FindNest_Scope, &range)){
+      for (;;){
+         pos = range.min;
+         if (!find_surrounding_nest(app, buffer, pos, FindNest_Scope, &range)){
+            break;
+         }
+      }
+      luis_select_scope(app, view, range);
+   }
 }

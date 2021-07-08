@@ -26,12 +26,12 @@ keys_global = {
     { "luis_code_index_next",               "Down", "Alt" },
     
 	 { "exit_4coder",          "F4", "Alt" },
-    { "list_all_locations_of_identifier",                  "F1" },
-    { "list_all_locations_of_identifier_case_insensitive", "F1", "Control"},
-    { "list_all_locations_of_selection",                   "F2" },
-	 { "list_all_locations_of_selection_case_insensitive",  "F2", "Control"},
-	 { "list_all_substring_locations",                      "F3" },
-	 { "list_all_substring_locations_case_insensitive",     "F3", "Control"},
+    { "luis_list_exact_matches_of_identifier",             "F1" },
+    //{ "list_all_locations_of_identifier_case_insensitive", "F1", "Control"},
+    //{ "list_all_locations_of_selection",                   "F2" },
+	 //{ "list_all_locations_of_selection_case_insensitive",  "F2", "Control"},
+	 //{ "list_all_substring_locations",                      "F3" },
+	 //{ "list_all_substring_locations_case_insensitive",     "F3", "Control"},
 
     //{ "toggle_footer_panel",     "F4" },
     //{ "open_footer_panel_big",   "F4", "Control"},
@@ -102,22 +102,17 @@ keys_file = {
 	 
     { "query_replace",               "Q", "Control" },
 	 { "query_replace_identifier",    "Q", "Alt" },
-    //{ "toggle_matching_cpp_file",    "K", "Control" },
+    { "luis_toggle_matching_cpp",    "K", "Control" },
 
-    //{ "show_buffer_code_notes",      "N", "Control" },
-	 //{ "selection_search",            "M", "Control" },
-    //{ "view_buffer_other_panel",     "M", "Control" },
+    { "luis_show_buffer_code_notes",      "N", "Control" },
 	
-
-	 
-    //{ "my_return",       "Return" },
-	 //{ "my_return_ctrl",  "Return", "Control" },
-    { "if_read_only_goto_position",  "Return", "Control" },
+    { "if_read_only_goto_position_same_panel",  "Return"},
+	 { "if_read_only_goto_position",             "Return", "Control" },
 
     { "word_complete",           "J", "Control" },
     //{ "word_complete_drop_down", "J", "Alt" },
 	 //{ "show_type_members", "J", "Alt" },
-    //{ "luis_scope_braces",      "I",      "Control" },
+    { "luis_scope_braces",      "I",      "Control" },
     
     { "auto_indent_range",       "Tab" },
     { "luis_write_tab",               "Tab", "Control" },
@@ -163,7 +158,8 @@ keys_modal = {
 
     { "auto_indent_range",         "Tab" },
     { "luis_write_tab",                 "Tab", "Control" },
-    //{ "my_return",                 "Return" },
+	 { "if_read_only_goto_position_same_panel",  "Return"},
+	 { "if_read_only_goto_position",             "Return", "Control" },
 
     { "cut",                         "X"},
     { "copy",                        "C"},
@@ -187,8 +183,8 @@ keys_modal = {
     //{ "select_surrounding_paren",         "9", "Control" },
 	 //{ "move_prev_brace",                  "LeftBracket" },
 	 //{ "move_next_brace",                  "RightBracket" },
-    { "select_surrounding_scope",         "Quote" },
-    { "select_surrounding_scope_maximal", "Quote", "Control" },
+    { "luis_select_surrounding_scope",         "Quote" },
+    { "luis_select_surrounding_scope_maximal", "Quote", "Control" },
 
     { "luis_multiline_comment_toggle",        "ForwardSlash"},
 	 
