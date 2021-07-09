@@ -1139,3 +1139,147 @@ CUSTOM_DOC("select surrounding scope")
       luis_select_scope(app, view, range);
    }
 }
+
+global i32 ON_MOUSE_CLICK_TAB_INDEX = -1;
+CUSTOM_COMMAND_SIG(luis_mouse_click)
+CUSTOM_DOC("Sets the cursor position and mark to the mouse position.")
+{
+   View_ID view = get_active_view(app, Access_ReadVisible);
+   Mouse_State mouse = get_mouse_state(app);
+   ON_MOUSE_CLICK_TAB_INDEX = -1;
+   
+   //NOTE(luis) added this to prevent mouse from clicking titlebar since we want that to select tabs for us
+   b64 showing_file_bar = false;
+   if(view_get_setting(app, view, ViewSetting_ShowFileBar, &showing_file_bar) && showing_file_bar) //draw file bar with tabs
+   {
+      Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+      Face_ID face_id = get_face_id(app, buffer);
+      Face_Metrics metrics = get_face_metrics(app, face_id);
+      f32 line_height = metrics.line_height;
+      if(mouse.p.y > (line_height + 2.0f))
+      {
+         i64 pos = view_pos_from_xy(app, view, V2f32(mouse.p));  
+         view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+         view_set_mark(app, view, seek_pos(pos));   
+      }   
+      else //detect if we are hitting a tab 
+      {
+         Buffer_Tab_Group *group = view_get_tab_group(app, view);
+         if(group)
+         {
+            Scratch_Block scratch(app);
+            Rect_f32 view_rect = view_get_screen_rect(app, view);
+            f32 atx = view_rect.x0;
+            for(i32 tab_index = 0; tab_index < group->tab_count; tab_index += 1)
+            {
+               Fancy_Line line = {};
+               Buffer_ID tab = group->tabs[tab_index];
+               b32 is_current_tab = tab_index == group->current_tab;
+               add_fancy_strings_for_tab(app, &line, scratch, tab, is_current_tab);
+               
+               f32 width = get_fancy_line_width(app, face_id, &line);
+               if(width > 0)
+               {
+                  if(mouse.p.x >= atx && mouse.p.x < (atx + width))
+                  {
+                     ON_MOUSE_CLICK_TAB_INDEX = tab_index;
+                     group->current_tab = tab_index;
+                     //set_new_current_tab(app, state, tab_index);
+                     break;
+                  }                     
+               }
+               atx += width;
+            }   
+         }
+      }
+   }
+   else
+   {
+      //what we normally did
+      i64 pos = view_pos_from_xy(app, view, V2f32(mouse.p));  
+      view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+      view_set_mark(app, view, seek_pos(pos));
+   }
+   
+}
+
+//on mouse drag
+CUSTOM_COMMAND_SIG(luis_mouse_drag)
+CUSTOM_DOC("If the mouse left button is pressed, sets the cursor position to the mouse position.")
+{
+   View_ID view = get_active_view(app, Access_ReadVisible);
+   Mouse_State mouse = get_mouse_state(app);
+   
+   if(mouse.l)
+   {
+      if(ON_MOUSE_CLICK_TAB_INDEX != -1) //we clicked on a tab
+      {
+         no_mark_snap_to_cursor(app, view);
+         Buffer_Tab_Group *group = view_get_tab_group(app, view);
+         if(group)
+         {
+            Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+            Face_ID face_id = get_face_id(app, buffer);
+            Scratch_Block scratch(app);
+            Rect_f32 view_rect = view_get_screen_rect(app, view);
+            f32 atx = view_rect.x0;
+            //find tab_index that isn't mouse selected one, and swap it with the selected one
+            for(i32 tab_index = 0; tab_index < group->tab_count; tab_index += 1)
+            {
+               Fancy_Line line = {};
+               b32 is_current_tab = tab_index == group->current_tab;
+               add_fancy_strings_for_tab(app, &line, scratch, group->tabs[tab_index], is_current_tab);
+               
+               f32 width = get_fancy_line_width(app, face_id, &line);
+               //if(tab_index == MOUSE_DRAG_LAST_SWAPPED_TAB_INDEX &&
+               if(tab_index != ON_MOUSE_CLICK_TAB_INDEX && //tab_index != MOUSE_DRAG_LAST_SWAPPED_TAB_INDEX 
+                  width > 0)
+               {
+                  f32 min = atx + width*0.33f;
+                  f32 max = atx + width - width*0.33f;
+                  if(mouse.p.x >= min && mouse.p.x < max)
+                  {
+                     Swap(Buffer_ID, group->tabs[tab_index], group->tabs[ON_MOUSE_CLICK_TAB_INDEX]);
+                     group->current_tab = tab_index;
+                     //set_new_current_tab(app, state, tab_index);
+                     //MOUSE_DRAG_LAST_SWAPPED_TAB_INDEX = ON_MOUSE_CLICK_TAB_INDEX; 
+                     ON_MOUSE_CLICK_TAB_INDEX = tab_index;
+                     break;
+                  }                     
+               }
+               atx += width;
+            }   
+         }
+      }
+      //original 4coder command
+      else  
+      {
+         i64 pos = view_pos_from_xy(app, view, V2f32(mouse.p));
+         view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+         no_mark_snap_to_cursor(app, view);
+         set_next_rewrite(app, view, Rewrite_NoChange);
+      }   
+   } 
+   else if(mouse.release_l && ON_MOUSE_CLICK_TAB_INDEX != -1)
+   {
+      ON_MOUSE_CLICK_TAB_INDEX = -1;
+   }
+}
+
+CUSTOM_COMMAND_SIG(luis_mouse_release)
+CUSTOM_DOC("Sets the cursor position to the mouse position.")
+{
+   if(ON_MOUSE_CLICK_TAB_INDEX != -1)
+   {
+      ON_MOUSE_CLICK_TAB_INDEX = -1;
+      //MOUSE_DRAG_LAST_SWAPPED_TAB_INDEX = -1;   
+   }
+   else
+   {
+      View_ID view = get_active_view(app, Access_ReadVisible);
+      Mouse_State mouse = get_mouse_state(app);
+      i64 pos = view_pos_from_xy(app, view, V2f32(mouse.p));
+      view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+      no_mark_snap_to_cursor(app, view);   
+   }
+}

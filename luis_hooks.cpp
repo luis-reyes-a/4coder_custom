@@ -996,7 +996,14 @@ luis_view_change_buffer(Application_Links *app, View_ID view_id,
             luis_view_clear_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
             //make new one if no tab present and have space
             if(!tab_with_id_already_present && group->tab_count < countof(group->tabs))
-               group->current_tab = group->tab_count++;
+            {
+               group->tab_count += 1;
+               for(i32 tab_index = group->tab_count - 1; tab_index > (group->current_tab + 1); tab_index -= 1)
+                  group->tabs[tab_index] = group->tabs[tab_index - 1];
+               group->current_tab += 1;
+               //group->current_tab = group->tab_count++; //add tab to the very end of array 
+            }
+               
          }
          group->tabs[group->current_tab] = new_buffer_id;
       }

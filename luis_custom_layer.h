@@ -266,29 +266,21 @@ luis_essential_mapping(Mapping *mapping, i64 global_id, i64 file_id, i64 code_id
    SelectMap(file_id);
    ParentMap(global_id);
    BindTextInput(write_text_input);
-   BindMouse(click_set_cursor_and_mark, MouseCode_Left);
-   BindMouseRelease(click_set_cursor, MouseCode_Left);
-   BindCore(click_set_cursor_and_mark, CoreCode_ClickActivateView);
-   BindMouseMove(click_set_cursor_if_lbutton);
-   //BindMouseMove(my_mouse_drag);
-   //BindMouse(mouse_select_token, MouseCode_Left, KeyCode_Control);
-   //BindMouse(mouse_select_line,  MouseCode_Left, KeyCode_Alt);
-   
-   
+   BindMouse(luis_mouse_click, MouseCode_Left);
+   BindCore(luis_mouse_click,  CoreCode_ClickActivateView);
+   BindMouseRelease(luis_mouse_release, MouseCode_Left);
+   BindMouseMove(luis_mouse_drag);
    
    SelectMap(code_id);
    ParentMap(file_id);
    BindTextInput(write_text_input);
-   //BindTextInput(write_text_and_auto_indent);
    
    SelectMap(modal_id);
    ParentMap(global_id);
-   BindMouse(click_set_cursor_and_mark, MouseCode_Left);
-   //BindMouse(mouse_select_token, MouseCode_Left, KeyCode_Control);
-   //BindMouse(mouse_select_line,  MouseCode_Left, KeyCode_Alt);
-   BindMouseRelease(click_set_cursor, MouseCode_Left);
-   BindCore(click_set_cursor_and_mark, CoreCode_ClickActivateView);
-   BindMouseMove(click_set_cursor_if_lbutton); 
+   BindMouse(luis_mouse_click, MouseCode_Left);
+   BindCore(luis_mouse_click,  CoreCode_ClickActivateView);
+   BindMouseRelease(luis_mouse_release, MouseCode_Left);
+   BindMouseMove(luis_mouse_drag);
 }
 
 internal Range_i64
