@@ -517,7 +517,7 @@ internal void
 append(String_Builder *builder, String_Const_u8 string) 
 {   append(builder, string.str, string.size);   }
 
-#if 0
+
 internal void
 append_valist(String_Builder *builder, u8 *fmt, va_list list)
 {
@@ -542,6 +542,7 @@ appendf(String_Builder *builder, u8 *fmt, ...)
    va_end(list);
 }
 
+#if 0
 //this is shorthand for appendf, mkstr(), we have this we can inline it as function argument...
 internal String_Const_u8
 mkstrf(String_Builder *builder, u8 *fmt, ...)
@@ -592,6 +593,20 @@ mkstr(String_Builder *builder)
       builder->current_string_length = 0;   
    }
    return result;
+}
+
+internal void
+logprintf(Application_Links *app, char *fmt, ...)
+{
+   LOCAL_STRING_BUILDER(builder, 1024);
+   va_list list;
+   va_start(list, fmt);
+   append_valist(&builder, (u8 *)fmt, list);
+   va_end(list);
+   
+   remove_trailing_whitespace(&builder);
+   append(&builder, "\n");
+   print_message(app, mkstr(&builder));
 }
 
 //returns newly made tab group_index

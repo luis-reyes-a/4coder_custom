@@ -1,10 +1,37 @@
-
+CUSTOM_COMMAND_SIG(luis_return)
+CUSTOM_DOC("If the buffer in the active view is writable, inserts a character, otherwise performs goto_jump_at_cursor.")
+{
+   View_ID view = get_active_view(app, Access_ReadVisible);
+   Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+   if(buffer) //can read and write
+   {
+      write_text(app, SCu8("\n"));
+      auto_indent_line_at_cursor(app);
+   }
+   else
+   {
+      goto_jump_at_cursor_same_panel(app);
+      //buffer = view_get_buffer(app, view, Access_ReadVisible);
+      //if(buffer) //got buffer back as readonly
+      //{
+         //goto_jump_at_cursor(app);
+         //lock_jump_buffer(app, buffer);
+      //}
+      //else leave_current_input_unhandled(app);
+   }
+   
+}
 
 CUSTOM_COMMAND_SIG(luis_new_tab_group)
 CUSTOM_DOC("make a new tab group")
 {
    View_ID view = get_active_view(app, Access_Always);
    view_new_tab_group(app, view);
+   
+   
+   
+   
+   
 }
 
 CUSTOM_COMMAND_SIG(luis_kill_tab_group)
@@ -247,15 +274,45 @@ CUSTOM_DOC("go end of visual line")
 CUSTOM_COMMAND_SIG(luis_build)
 CUSTOM_DOC("build")
 {
-   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION))
-      kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION);
-   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH))
-      kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION_SCRATCH);
-   
+   logprintf(app, "\nluis_build printing (%d groups init)...\n", BUFFER_TAB_GROUP_COUNT);
+   View_ID build_view = 0;
+   if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION)) //*compile* tab group open
+   {
+      assert(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH));
+      for(View_ID v = get_view_next(app, 0, Access_Always); v; v = get_view_next(app, v, Access_Always))
+      {
+         if(view_get_tab_group_index(app, v) == BUFFER_TAB_GROUP_COMPILATION)
+         {
+            build_view = v;
+            break;
+         }
+      }
+      //luis_close_tab_or_panel(app);
+   }
+   //if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION))
+   //{
+      //kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION);
+      //print_message(app, SCu8("killing comp group\n"));
+   //}
+   //if(is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH))
+   //{
+      //kill_tab_group(app, BUFFER_TAB_GROUP_COMPILATION_SCRATCH);
+      //print_message(app, SCu8("killing comp scratch group\n"));
+   //}
    View_ID view = get_active_view(app, Access_Always);
    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+   if(!build_view)
+   {
+      assert(!is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION));
+      assert(!is_valid_tab_group_index(BUFFER_TAB_GROUP_COMPILATION_SCRATCH));
+      
+      build_view = luis_get_or_split_peek_window(app, view, ViewSplit_Bottom);
+      view_new_tab_group(app, view);
+      BUFFER_TAB_GROUP_COMPILATION_SCRATCH = view_get_tab_group_index(app, view);
+      BUFFER_TAB_GROUP_COMPILATION = view_get_tab_group_index(app, build_view);
+   }
    
-   View_ID build_view = luis_get_or_split_peek_window(app, view, ViewSplit_Bottom);
+   
    if(build_view)
    {
       standard_search_and_build(app, build_view, buffer);
@@ -264,9 +321,7 @@ CUSTOM_DOC("build")
       block_zero_struct(&prev_location);
       lock_jump_buffer(app, string_u8_litexpr("*compilation*"));
       
-      view_new_tab_group(app, view);
-      BUFFER_TAB_GROUP_COMPILATION_SCRATCH = view_get_tab_group_index(app, view);
-      BUFFER_TAB_GROUP_COMPILATION = view_get_tab_group_index(app, build_view);
+      logprintf(app, "Built and now have %d groups open\n", BUFFER_TAB_GROUP_COUNT);
    }
 }
 

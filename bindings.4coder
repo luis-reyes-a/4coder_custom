@@ -106,7 +106,7 @@ keys_file = {
 
     { "luis_show_buffer_code_notes",      "N", "Control" },
 	
-    { "if_read_only_goto_position_same_panel",  "Return"},
+    { "luis_return",  "Return"},
 	 { "if_read_only_goto_position",             "Return", "Control" },
 
     { "word_complete",           "J", "Control" },
@@ -158,7 +158,7 @@ keys_modal = {
 
     { "auto_indent_range",         "Tab" },
     { "luis_write_tab",                 "Tab", "Control" },
-	 { "if_read_only_goto_position_same_panel",  "Return"},
+	 { "luis_return",  "Return"},
 	 { "if_read_only_goto_position",             "Return", "Control" },
 
     { "cut",                         "X"},
