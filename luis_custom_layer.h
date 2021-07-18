@@ -30,6 +30,7 @@ global b32 MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION;
 global Face_ID SMALL_CODE_FACE;
 global Face_ID ITALICS_CODE_FACE;
 global Face_ID BOLD_CODE_FACE;
+global i64 PREV_PASTE_INIT_CURSOR_POS = -1;
 
 struct Peek_Code_Index_State
 {

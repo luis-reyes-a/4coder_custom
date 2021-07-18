@@ -173,7 +173,12 @@ CUSTOM_DOC("Input consumption loop for default view behavior")
       {
          //b32 do_kill_tab_group = luis_view_has_flags(app, view, VIEW_KILL_TAB_GROUP_ON_VIEW_CLOSE);
          //i32 tab_group_index = view_get_tab_group_index(app, view);
+         i64 cursor_pos_before_executed_command = view_get_cursor_pos(app, view); 
          map_result.command(app);
+         if(map_result.command == paste)
+            PREV_PASTE_INIT_CURSOR_POS = cursor_pos_before_executed_command;
+         else
+            PREV_PASTE_INIT_CURSOR_POS = -1;
          //if(!view_exists(app, view) && do_kill_tab_group) //pseudo-hook for when a view is being destroyed
          //{
             //kill_tab_group(app, tab_group_index);

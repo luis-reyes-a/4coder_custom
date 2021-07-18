@@ -22,16 +22,29 @@ CUSTOM_DOC("If the buffer in the active view is writable, inserts a character, o
    
 }
 
+CUSTOM_COMMAND_SIG(luis_indent_range)
+CUSTOM_DOC("indent_range")
+{
+   if(PREV_PASTE_INIT_CURSOR_POS > -1)
+   {
+      View_ID view = get_active_view(app, Access_ReadWriteVisible);
+      Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+      Range_i64 range = Ii64(PREV_PASTE_INIT_CURSOR_POS, view_get_cursor_pos(app, view));
+      if(range.min != range.max)
+      {
+         auto_indent_buffer(app, buffer, range);
+         move_past_lead_whitespace(app, view, buffer);   
+      }
+   }
+   else auto_indent_range(app);
+}
+
+
 CUSTOM_COMMAND_SIG(luis_new_tab_group)
 CUSTOM_DOC("make a new tab group")
 {
    View_ID view = get_active_view(app, Access_Always);
-   view_new_tab_group(app, view);
-   
-   
-   
-   
-   
+   view_new_tab_group(app, view);   
 }
 
 CUSTOM_COMMAND_SIG(luis_kill_tab_group)
@@ -185,11 +198,12 @@ luis_offset_code_index(Application_Links *app, i32 offset)
    i32 new_index = state->index + offset;
    if(new_index < 0)	new_index = 0;
    
-   if(state->index != new_index)
+   //if(state->index != new_index)
+   if(state->first_note)
    {
-      Code_Index_Note *note = 0;
+      Code_Index_Note *note = state->first_note;
       i32 current_index = 0;
-      for(Code_Index_Note *n = state->first_note; n; n = n->next_in_hash)
+      for(Code_Index_Note *n = note; n; n = n->next_in_hash)
       {
          if(string_match(n->text, identifier))
          {
@@ -407,7 +421,7 @@ CUSTOM_DOC("move right")
 
 CUSTOM_COMMAND_SIG(luis_center_view_top)
 CUSTOM_DOC("Centers the view vertically on the line on which the cursor sits.")
-{	center_view(app, get_active_view(app, Access_ReadVisible), 0.05f);	}
+{	center_view(app, get_active_view(app, Access_ReadVisible), 0.1f);	}
 
 
 CUSTOM_COMMAND_SIG(luis_write_underscore)
@@ -658,15 +672,23 @@ luis_isearch(Application_Links *app, Scan_Direction start_scan, i64 first_pos, S
             Command_Binding binding = map_get_binding_recursive(mapping, map, &in.event);
             if (binding.custom != 0)
             {
-               if (binding.custom == luis_fsearch)
+               if(binding.custom == luis_fsearch || binding.custom == luis_rsearch)
                {
-                  change_scan = Scan_Forward;
-                  do_scan_action = true;
-               }
-               else if (binding.custom == luis_rsearch)
-               {
-                  change_scan = Scan_Backward;
-                  do_scan_action = true;
+                  if(bar.string.size == 0)
+                  {
+                     bar.string.size = cstring_length(previous_isearch_query);
+                     block_copy(bar.string.str, previous_isearch_query, bar.string.size);
+                  }
+                  else if(binding.custom == luis_fsearch)
+                  {
+                     change_scan = Scan_Forward;
+                     do_scan_action = true;   
+                  }
+                  else if(binding.custom == luis_rsearch)
+                  {
+                     change_scan = Scan_Backward;
+                     do_scan_action = true;
+                  }
                }
                else if (binding.custom == luis_write_underscore)
                   BAR_APPEND_STRING(SCu8("_"));

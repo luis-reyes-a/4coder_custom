@@ -114,8 +114,11 @@ keys_file = {
 	 //{ "show_type_members", "J", "Alt" },
     { "luis_scope_braces",      "I",      "Control" },
     
-    { "auto_indent_range",       "Tab" },
-    { "luis_write_tab",               "Tab", "Control" },
+    { "luis_indent_range",       "Tab" },
+    { "luis_write_tab",          "Tab", "Shift" },
+    { "luis_tab_next",           "Tab", "Control" },
+    { "luis_tab_prev",           "Tab", "Control", "Shift" },
+    
 	 { "goto_line",               "G", "Control" },
 
 	 { "comment_line_toggle",     "ForwardSlash", "Control"},
@@ -156,7 +159,7 @@ keys_modal = {
     { "cursor_mark_swap",            "Space", "Control" },
     { "write_space",                 "Space", "Shift" },
 
-    { "auto_indent_range",         "Tab" },
+    { "luis_indent_range",         "Tab" },
     { "luis_write_tab",                 "Tab", "Control" },
 	 { "luis_return",  "Return"},
 	 { "if_read_only_goto_position",             "Return", "Control" },
