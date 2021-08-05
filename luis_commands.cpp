@@ -1048,7 +1048,8 @@ CUSTOM_DOC("Peek code index")
 //global Render_Caller_Function *PREV_RENDER_CALLER;
 
 function void
-luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view){
+luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view)
+{
    Render_Caller_Function **prev_render_caller = view_get_prev_render_caller(app, view);
    if(prev_render_caller)	(*prev_render_caller)(app, frame_info, view);
    
@@ -1075,8 +1076,8 @@ luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view){
    Rect_f32 region = view_rect;
    //region.x0 += view_width*0.185f;
    //region.x1 -= view_width*0.185f;
-   region.x0 += view_width*0.45f;
-   region.x1 -= view_width*0.05f;
+   region.x0 += view_width*0.52f;
+   region.x1 -= view_width*0.02f;
    region.y0 += line_height*1.0f;
    region.y1 = region.y0 + view_height*0.6f;
    if(region.y1 > view_rect.y1)
@@ -1090,13 +1091,12 @@ luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view){
    
    Rect_f32 prev_clip = draw_set_clip(app, region);
    
-   
-   
    f32 block_height = lister_get_block_height(line_height);
    f32 text_field_height = lister_get_text_field_height(line_height);
    
    // NOTE(allen): file bar
    // TODO(allen): What's going on with 'showing_file_bar'? I found it like this.
+   #if 0
    b64 showing_file_bar = false;
    b32 hide_file_bar_in_ui = def_get_config_b32(vars_save_string_lit("hide_file_bar_in_ui"));
    if (view_get_setting(app, view, ViewSetting_ShowFileBar, &showing_file_bar) &&
@@ -1106,6 +1106,7 @@ luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view){
       draw_file_bar(app, view, buffer, face_id, pair.min);
       region = pair.max;
    }
+   #endif
    
    Mouse_State mouse = get_mouse_state(app);
    Vec2_f32 m_p = V2f32(mouse.p);
@@ -1258,7 +1259,7 @@ luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index 
    
    *prev_render_caller = ctx.render_caller; 
    ctx.render_caller = luis_lister_render;
-   ctx.hides_buffer = true;
+   ctx.hides_buffer = false; //NOTE this was originally set to true
    View_Context_Block ctx_block(app, view, &ctx);
    
    if (lister->handlers.navigate && best_starting_index > 0)
@@ -1492,14 +1493,23 @@ lister_code_index_navigate(Application_Links *app, View_ID view, Lister *lister,
       lister->item_index = clamp(0, new_index, lister->filtered.count - 1);
    }
    lister->set_vertical_focus_to_item = true;
-   lister_update_selection_values(lister);
-   Code_Index_Note *note = (Code_Index_Note *)lister_get_user_data(lister, lister->raw_item_index);
-   //view_set_buffer(app, view, note->file->buffer, 0);
-   view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
-   view_set_mark(app, view, seek_pos(note->pos.first));
-   center_view(app, view, 0.1f);
-   //raw_item_index should be set correctly here
+   lister_update_selection_values(lister); //raw_item_index should be set correctly after this line
    
+   Code_Index_Note *note = (Code_Index_Note *)lister_get_user_data(lister, lister->raw_item_index);
+   if(note)
+   {
+      //Buffer_ID view_buffer = view_get_buffer(app, view, Access_Always);
+      //if(view_buffer == note->file->buffer)
+      {
+         //NOTE for whatever reason this causes get_next_input_raw to send an abort message and then later we
+         //crash on the 4coder dll side. Seems like 4coder doesn't expect to change buffer mid loop like this?
+         view_set_buffer(app, view, note->file->buffer, SetBuffer_KeepOriginalGUI);
+         
+         view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
+         view_set_mark(app, view, seek_pos(note->pos.first));
+         center_view(app, view, 0.1f);
+      }
+   }  
 }
 
 CUSTOM_COMMAND_SIG(luis_show_buffer_code_notes)
@@ -1536,8 +1546,16 @@ CUSTOM_DOC("show all the code notes found for this buffer")
          
          if(!note->parent) //only add top level notes
          {
-            String_Const_u8 status = push_buffer_line(app, scratch, buffer_id, get_line_number_from_pos(app, buffer_id, note->pos.min));
-            lister_add_item(lister, note->text, status, (void*)note, 0);   
+            Lister_Prealloced_String status = {};
+            Lister_Prealloced_String line_string = lister_prealloced(push_buffer_line(app, lister.lister.current->arena, buffer_id, 
+                                                           get_line_number_from_pos(app, buffer_id, note->pos.min)));
+            if(line_string.string.str)
+               lister_add_item(lister, line_string, status, (void*)note, 0);
+            else
+            {
+               Lister_Prealloced_String note_name = lister_prealloced(push_string_copy(lister.lister.current->arena, note->text));
+               lister_add_item(lister, note_name, status, (void*)note, 0);
+            }
          }
          
       }
@@ -1573,7 +1591,12 @@ show_buffer_code_notes_all_buffers(Application_Links *app, b32 show_functions, b
    lister_set_query(lister, SCu8("Index: "));
    lister_set_default_handlers(lister);
    //NOTE this causes a crash whenever we call view_set_buffer for whatever reason...
-   //lister.lister.current->handlers.navigate = lister_code_index_navigate;
+   lister.lister.current->handlers.navigate = lister_code_index_navigate;
+   
+   View_ID view = get_active_view(app, Access_Always);
+   Buffer_ID init_buffer = view_get_buffer(app, view, Access_Always);
+   i64 init_pos = view_get_cursor_pos(app, view);
+   f32 init_preferred_x = view_get_preferred_x(app, view);
    
    for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
         buffer != 0;
@@ -1591,8 +1614,16 @@ show_buffer_code_notes_all_buffers(Application_Links *app, b32 show_functions, b
                (note->note_kind == CodeIndexNote_Type     && show_types) ||
                (note->note_kind == CodeIndexNote_Macro    && show_macros))
             {
-               String_Const_u8 status = push_buffer_line(app, scratch, note->file->buffer, get_line_number_from_pos(app, note->file->buffer, note->pos.min));
-               lister_add_item(lister, note->text, status, (void*)note, 0);   
+               Lister_Prealloced_String status = {};
+               Lister_Prealloced_String line_string = lister_prealloced(push_buffer_line(app, lister.lister.current->arena, buffer, 
+                                                                                         get_line_number_from_pos(app, buffer, note->pos.min)));
+               if(line_string.string.str)
+                  lister_add_item(lister, line_string, status, (void*)note, 0);
+               else
+               {
+                  Lister_Prealloced_String note_name = lister_prealloced(push_string_copy(lister.lister.current->arena, note->text));
+                  lister_add_item(lister, note_name, status, (void*)note, 0);
+               }
             }
             
          }
@@ -1603,10 +1634,16 @@ show_buffer_code_notes_all_buffers(Application_Links *app, b32 show_functions, b
    if (!l_result.canceled)
    {
       Code_Index_Note *note = (Code_Index_Note *)l_result.user_data;
-      View_ID view = get_active_view(app, Access_Always);
       view_set_buffer(app, view, note->file->buffer, 0);
       view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
       luis_center_view_top(app);
+   }
+   else
+   {
+      view_set_buffer(app, view, init_buffer, 0);
+      view_set_cursor(app, view, seek_pos(init_pos));
+      view_set_mark(app, view, seek_pos(init_pos));
+      view_set_preferred_x(app, view, init_preferred_x);
    }
 }
 
