@@ -22,7 +22,6 @@ defcolor_at_highlight = defcolor_back;
 defcolor_comment = 0xff859900; //0xFF586e75;
 defcolor_comment_pop = {0xff268bd2, 0xffdc322f};
 
-
 defcolor_keyword = 0xff268bd2;
 
 defcolor_str_constant = 0xff2aa198;
@@ -63,5 +62,5 @@ luiscolor_function = 0xff6c71c4;
 luiscolor_type     = 0xffd33682;
 luiscolor_modal_cursor = 0xffdc322f;
 
-//defcolor_base_current_tab = 0xff000000;
-//defcolor_base_error_tab   = 0xff6c71c4;
+luiscolor_tab_current   = 0xff000000;
+luiscolor_tab_regular   = defcolor_back;

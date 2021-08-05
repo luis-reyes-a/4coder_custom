@@ -16,7 +16,9 @@
 
 CUSTOM_ID(attachment, view_custom_flags);
 CUSTOM_ID(attachment, view_code_peek_state);
-CUSTOM_ID(attachment, view_tab_group_index);
+//CUSTOM_ID(attachment, view_tab_group_index);
+CUSTOM_ID(attachment, view_tab_group);
+CUSTOM_ID(attachment, view_prev_render_caller);
 //CUSTOM_ID(attachment, view_current_tab); not good idea, you'd have to store per view, per BUFFER_TAB_GROUP_COUNT
 
 CUSTOM_ID(colors, luiscolor_type);
@@ -24,6 +26,9 @@ CUSTOM_ID(colors, luiscolor_macro);
 CUSTOM_ID(colors, luiscolor_function);
 CUSTOM_ID(colors, luiscolor_variable_decl);
 CUSTOM_ID(colors, luiscolor_modal_cursor);
+CUSTOM_ID(colors, luiscolor_tab_current);
+CUSTOM_ID(colors, luiscolor_tab_regular);
+CUSTOM_ID(colors, luiscolor_logical_not);
 global b32 IN_MODAL_MODE;
 global b32 SHOW_BRACE_LINE_ANNOTATIONS;
 global b32 MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION;
@@ -31,6 +36,7 @@ global Face_ID SMALL_CODE_FACE;
 global Face_ID ITALICS_CODE_FACE;
 global Face_ID BOLD_CODE_FACE;
 global i64 PREV_PASTE_INIT_CURSOR_POS = -1;
+global i32 CURSOR_PEEK_CODE_INDEX_RELATIVE_LINE_OFFSET = -1;
 
 struct Peek_Code_Index_State
 {
@@ -45,6 +51,7 @@ enum Custom_View_Flags
    VIEW_ADD_NEW_BUFFER_AS_NEW_TAB = (1 << 2), //otherwise we overwrite current_tab
    //VIEW_KILL_TAB_GROUP_ON_VIEW_CLOSE = (1 << 3), //search in luis_hooks.cpp if you want this behaviour
 };
+
 
 
 //NOTE(luis) you can build panel layouts into this and just store a global current_workspace
@@ -91,15 +98,13 @@ luis_view_clear_flags(Application_Links *app, View_ID view, u32 flags)
 internal b32
 find_tab_with_buffer_id(Buffer_Tab_Group *group, Buffer_ID id, i32 *out_found_index)
 {
-   foreach_index_inc(i, group->tab_count)
-      if(group->tabs[i] == id)
-   	{
-      	*out_found_index = i;
-      	return true;
-   	}
+   foreach_index_inc(i, group->tab_count) if(group->tabs[i] == id)
+   {
+      *out_found_index = i;
+      return true;
+   }
    return false;
 }
-
 
 
 internal View_ID
@@ -303,6 +308,7 @@ get_visual_line_start_end_pos(Application_Links *app, View_ID view, i64 linenum)
 internal void
 center_view(Application_Links *app, View_ID view, float shift_y)
 {
+   if(!view)	return;
    //View_ID view = get_active_view(app, Access_ReadVisible);
    Rect_f32 region = view_get_buffer_region(app, view);
    i64 pos = view_get_cursor_pos(app, view);
@@ -445,28 +451,19 @@ find_next_parens_absolute(Application_Links *app, Buffer_ID buffer, i64 pos, Ran
 internal void
 add_fancy_strings_for_tab(Application_Links *app, Fancy_Line *list, Arena *scratch, Buffer_ID tab, b32 is_current_tab)
 {
-   FColor base_color = fcolor_id(defcolor_base);
-   FColor pop2_color = fcolor_id(luiscolor_function);
-   Assert(buffer_exists(app, tab));
-   
+   Assert(buffer_exists(app, tab));  
    String_Const_u8 unique_name = push_buffer_unique_name(app, scratch, tab);
-   FColor color = base_color;
-   if(is_current_tab) //highlight which tab we're on
-   { 
-      color = pop2_color;
-      
-   }
+   FColor color = (is_current_tab) ? fcolor_id(luiscolor_tab_current) : fcolor_id(luiscolor_tab_regular);
    push_fancy_string(scratch, list, color, unique_name);
    if(is_current_tab)
    {
       Dirty_State dirty = buffer_get_dirty_state(app, tab);
-      u8 space[3];
-      String_u8 str = Su8(space, 0, 3);
-      if (HasFlag(dirty, DirtyState_UnsavedChanges)) string_append(&str, string_u8_litexpr("*"));
-      if (HasFlag(dirty, DirtyState_UnloadedChanges)) string_append(&str, string_u8_litexpr("!"));
-      push_fancy_string(scratch, list, pop2_color, str.string);
+      if(HasFlag(dirty, DirtyState_UnsavedChanges))  
+         push_fancy_string(scratch, list, color, SCu8("*"));
+      if(HasFlag(dirty, DirtyState_UnloadedChanges)) 
+         push_fancy_string(scratch, list, color, SCu8("!"));
    }
-   push_fancy_string(scratch, list, base_color,  SCu8(" "));
+   push_fancy_string(scratch, list, color,  SCu8(" "));
 }
 
 #define LOCAL_STRING_BUILDER(_name, _buffer_size) u8 buffer_for_ ## _name[_buffer_size]; String_Builder _name = make_string_builder(buffer_for_ ## _name, (_buffer_size))
@@ -611,6 +608,7 @@ logprintf(Application_Links *app, char *fmt, ...)
 }
 
 //returns newly made tab group_index
+#if 0
 internal i32
 view_new_tab_group(Application_Links *app, View_ID view)
 {
@@ -647,6 +645,9 @@ view_get_tab_group(Application_Links *app, View_ID view)
       group = BUFFER_TAB_GROUPS + *tab_group_index;
    return group;
 }
+
+
+
 
 internal i32
 view_get_tab_group_index(Application_Links *app, View_ID view)
@@ -710,4 +711,22 @@ kill_tab_group(Application_Links *app, i32 tab_group_index)
       } //while(v != view);
    }
 }
+#endif
+
+internal Buffer_Tab_Group *
+view_get_tab_group(Application_Links *app, View_ID view)
+{
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   Buffer_Tab_Group *group = scope_attachment(app, scope, view_tab_group, Buffer_Tab_Group);
+   return group;
+}
+
+internal Render_Caller_Function **
+view_get_prev_render_caller(Application_Links *app, View_ID view)
+{
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   Render_Caller_Function **func = (Render_Caller_Function **)scope_attachment(app, scope, view_prev_render_caller, void *);
+   return func;
+}
+
 #endif //LUIS_CUSTOM_LAYER_H

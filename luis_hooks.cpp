@@ -76,7 +76,7 @@ CUSTOM_DOC("Default command for responding to a startup event")
       //Buffer_ID default_buffer_id = buffer_identifier_to_id(app, buffer_identifier(string_u8_litexpr("*scratch*")));
       Buffer_ID default_buffer_id = buffer_identifier_to_id(app, buffer_identifier(string_u8_litexpr("*messages*")));
       view_set_buffer(app, view, default_buffer_id, 0);
-      luis_new_tab_group(app);
+      //luis_new_tab_group(app);
       
       b32 auto_load = def_get_config_b32(vars_save_string_lit("automatically_load_project"));
       if (auto_load){
@@ -179,6 +179,9 @@ CUSTOM_DOC("Input consumption loop for default view behavior")
             PREV_PASTE_INIT_CURSOR_POS = cursor_pos_before_executed_command;
          else
             PREV_PASTE_INIT_CURSOR_POS = -1;
+         
+         if(map_result.command != luis_peek_code_index_up && map_result.command != luis_peek_code_index_down)
+            CURSOR_PEEK_CODE_INDEX_RELATIVE_LINE_OFFSET = -1;
          //if(!view_exists(app, view) && do_kill_tab_group) //pseudo-hook for when a view is being destroyed
          //{
             //kill_tab_group(app, tab_group_index);
@@ -327,6 +330,8 @@ get_token_visual_properties(Application_Links *app, Buffer_ID buffer, Token_Iter
    else if(note && note->note_kind == CodeIndexNote_Type)  prop.color = fcolor_resolve(fcolor_id(luiscolor_type));//= 0xffE89393; //pinkish
    else if(note && note->note_kind == CodeIndexNote_Macro) prop.color = fcolor_resolve(fcolor_id(luiscolor_macro));//= 0xffDFAF8F; //orange
    else if(does_token_look_like_var_identifier(app, buffer, it, token)) prop.color = fcolor_resolve(fcolor_id(luiscolor_variable_decl));
+   else if(token->kind == TokenBaseKind_Operator && token->sub_kind == TokenCppKind_Not)
+      prop.color = fcolor_resolve(fcolor_id(luiscolor_logical_not));
    
    if(token->kind == TokenBaseKind_Keyword)      prop.special_face_id = BOLD_CODE_FACE;
    else if(token->kind == TokenBaseKind_Comment) prop.special_face_id = ITALICS_CODE_FACE;
@@ -601,6 +606,9 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
    i64 cursor_pos = view_correct_cursor(app, view_id);
    view_correct_mark(app, view_id);
    
+   //Mouse_State mouse = get_mouse_state(app);
+   //i64 mouse_pos = view_pos_from_xy(app, view_id, V2f32(mouse.p));
+   
    // NOTE(allen): Line highlight
    b32 highlight_line_at_cursor = def_get_config_b32(vars_save_string_lit("highlight_line_at_cursor"));
    if (highlight_line_at_cursor && is_active_view){
@@ -609,6 +617,7 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
    }
    
    // NOTE(allen): Token colorizing
+   Token *token_cursor_over = 0;
    Token_Array token_array = get_token_array_from_buffer(app, buffer);
    if (token_array.tokens != 0)
    {
@@ -622,13 +631,21 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
       {
          Token *token = token_it_read(&it);
          if(token->pos >= visible_range.one_past_last)	break;
+         
+         //if((mouse_pos >= token->pos) && (mouse_pos < (token->pos + token->size)))
+            //token_mouse_over = token;
+         
+         if((cursor_pos >= token->pos) && (cursor_pos < (token->pos + token->size)))
+            token_cursor_over = token;
+         
          Token_Visual_Properties prop = get_token_visual_properties(app, buffer, &it, token);
          Rect_f32 first_rect = text_layout_character_on_screen(app, text_layout_id, token->pos);
          if(prop.special_face_id)
             draw_buffer_range(app, buffer, text_layout_id, prop.special_face_id, Ii64_size(token->pos, token->size), prop.color);
-         else paint_text_color(app, text_layout_id, Ii64_size(token->pos, token->size), prop.color);
+         else	
+            paint_text_color(app, text_layout_id, Ii64_size(token->pos, token->size), prop.color);
          
-         
+         //TODO maybe just render a small rectangle
          String_Const_u8 underline_str = SCu8("_______________________________________________________________________________________________________________________________________________________________________________________________");
          if(prop.underline && (u64)token->size <= underline_str.size)
          {
@@ -641,7 +658,7 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
 #endif
       
       // NOTE(allen): Scan for TODOs and NOTEs
-      b32 use_comment_keyword = def_get_config_b32(vars_save_string_lit("use_comment_keyword"));
+      b32 use_comment_keyword = def_get_config_b32(vars_save_string_lit("use_comment_keywords"));
       if (use_comment_keyword){
          Comment_Highlight_Pair pairs[] = {
             {string_u8_litexpr("NOTE"), finalize_color(defcolor_comment_pop, 0)},
@@ -687,6 +704,8 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
    else{
       paint_text_color_fcolor(app, text_layout_id, visible_range, fcolor_id(defcolor_text_default));
    }
+   
+   
    
    
    
@@ -786,6 +805,68 @@ luis_render_buffer(Application_Links *app, View_ID view_id, Face_ID face_id,
    // NOTE(allen): put the actual text on the actual screen
    draw_text_layout_default(app, text_layout_id);
    
+   if(CURSOR_PEEK_CODE_INDEX_RELATIVE_LINE_OFFSET >= 0 &&
+      token_cursor_over && token_cursor_over->kind == TokenBaseKind_Identifier)
+   {
+      FColor highlight_fcolor = fcolor_id(defcolor_pop2);
+      Scratch_Block scratch(app);
+      String_Const_u8 token_string = push_token_lexeme(app, scratch, buffer, token_cursor_over);
+      Code_Index_Note *note = code_index_note_from_string(token_string);
+      if(note)
+      {
+         i64 line_start = get_line_number_from_pos(app, note->file->buffer, note->pos.start);
+         line_start += CURSOR_PEEK_CODE_INDEX_RELATIVE_LINE_OFFSET;
+         i32 num_lines_to_peek = 8;
+         //if(note->kind == Code_Index_Note_Kind
+         
+         Fancy_Block block = {};
+         {
+            Fancy_Line *line = push_fancy_line(scratch, &block, face_id);
+            String_Const_u8 buffer_name = push_buffer_unique_name(app, scratch, note->file->buffer);
+            push_fancy_string(scratch, line, highlight_fcolor, buffer_name);
+            push_fancy_stringf(scratch, line, highlight_fcolor, " :%lld", line_start);
+         }
+         
+         foreach_index_inc(i, num_lines_to_peek)
+         {
+            Fancy_Line *line = push_fancy_line(scratch, &block, face_id);
+            //push_fancy_stringf(scratch, line, fcolor_id(defcolor_pop1), "F%d:", i + 1);
+            String_Const_u8 textline = push_buffer_line(app, scratch, note->file->buffer, line_start + i);
+            push_fancy_string(scratch, line, fcolor_id(defcolor_text_default), textline);
+            
+            
+            //i64 cursor_position = view_get_cursor_pos(app, view_id);
+            //Buffer_Cursor cursor = view_compute_cursor(app, view_id, seek_pos(cursor_position));
+            //push_fancy_stringf(scratch, &line, base_color, "%lld-", cursor.line);
+         }
+         
+         Rect_f32 region = view_get_buffer_region(app, view_id);
+         
+         Buffer_Scroll scroll = view_get_buffer_scroll(app, view_id);
+         Buffer_Point buffer_point = scroll.position;
+         Vec2_f32 cursor_p = view_relative_xy_of_pos(app, view_id, buffer_point.line_number, cursor_pos);
+         //Vec2_f32 cursor_p;
+         //cursor_p.x = (f32)mouse.p.x;
+         //cursor_p.y = (f32)mouse.p.y;
+         cursor_p -= buffer_point.pixel_shift;
+         cursor_p += region.p0;
+         
+         //Face_Metrics metrics = get_face_metrics(app, face);
+         f32 x_padding = metrics.normal_advance;
+         f32 x_half_padding = x_padding*0.5f;
+         
+         draw_drop_down(app, face_id, &block, cursor_p, region, x_padding, x_half_padding,
+                        highlight_fcolor, fcolor_id(defcolor_back));
+         
+         
+         //Rect_f32 popup_rect = text_layout_character_on_screen(app, text_layout_id, token_mouse_over->pos);
+         //popup_rect.x1 += 64;
+         //popup_rect.y1 += 64;
+         //f32 popup_roundness = 6.0f;
+         //draw_rectangle_fcolor(app, popup_rect, popup_roundness, fcolor_id(defcolor_pop1));   
+      }
+   }
+   
    draw_set_clip(app, prev_clip);
 }
 
@@ -793,22 +874,7 @@ internal void
 luis_draw_file_bar(Application_Links *app, View_ID view_id, Buffer_ID buffer, Face_ID face_id, Rect_f32 bar)
 {
    i32 current_tab = 0;
-   Buffer_Tab_Group *group = 0;
-   {
-      Managed_Scope scope = view_get_managed_scope(app, view_id);
-      i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
-      if(tab_group_index)
-      {
-         assert(*tab_group_index >= 0 && *tab_group_index < countof(BUFFER_TAB_GROUPS));
-         group = BUFFER_TAB_GROUPS + *tab_group_index;
-      }
-      
-      //i32 *current_tab_ptr = scope_attachment(app, scope, view_current_tab, i32);
-      //if(current_tab_ptr)
-         //current_tab = *current_tab_ptr;
-   }
-   
-   
+   Buffer_Tab_Group *group = view_get_tab_group(app, view_id);
    if(!group) //if not available, do normal 4coder way
    {
       draw_file_bar(app, view_id, buffer, face_id, bar);
@@ -820,8 +886,6 @@ luis_draw_file_bar(Application_Links *app, View_ID view_id, Buffer_ID buffer, Fa
    draw_rectangle_fcolor(app, bar, 0.f, fcolor_id(defcolor_bar));
    
    Fancy_Line list = {};
-   FColor base_color = fcolor_id(defcolor_base);
-   FColor pop2_color = fcolor_id(luiscolor_function);
    b32 current_tab_is_active_buffer = false;
    for(i32 tab_index = 0; tab_index < group->tab_count; tab_index += 1)
    {
@@ -839,20 +903,8 @@ luis_draw_file_bar(Application_Links *app, View_ID view_id, Buffer_ID buffer, Fa
       if(is_current_tab)
          current_tab_is_active_buffer = true; 
    }
-   if(!current_tab_is_active_buffer) //if the actively viewing buffer doesn't match the current tab, then we draw it last with diff color
-   {
-      //Assert(state->peek_tab.id == buffer);
-      String_Const_u8 unique_name = push_buffer_unique_name(app, scratch, buffer);
-      push_fancy_string(scratch, &list, fcolor_id(luiscolor_macro), unique_name);
-      Dirty_State dirty = buffer_get_dirty_state(app, buffer);
-      u8 space[3];
-      String_u8 str = Su8(space, 0, 3);
-      if (HasFlag(dirty, DirtyState_UnsavedChanges)) string_append(&str, string_u8_litexpr("*"));
-      if (HasFlag(dirty, DirtyState_UnloadedChanges)) string_append(&str, string_u8_litexpr("!"));
-      push_fancy_string(scratch, &list, pop2_color, str.string);
-      push_fancy_string(scratch, &list, base_color,  SCu8(" "));
-   }
    
+   FColor base_color = fcolor_id(luiscolor_tab_current);
    
    //line number
    i64 cursor_position = view_get_cursor_pos(app, view_id);
@@ -964,41 +1016,23 @@ luis_view_change_buffer(Application_Links *app, View_ID view_id,
 		*prev_buffer_id = old_buffer_id;
 	}
    
-   i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
-   if(tab_group_index)
+   //if(old_buffer_id == 0) //view creation, set it's default tab group
+   
+   //i32 *tab_group_index = scope_attachment(app, scope, view_tab_group_index, i32);
+   Buffer_Tab_Group *group = view_get_tab_group(app, view_id);
+   if(group)
    {
-      if(old_buffer_id == 0) //view creation, set it's default tab group
+      if(group->tab_count == 0) //first tab being added
       {
-         //since panels always open by splitting, we should always get a child view here...
-         if(MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION)
-         {
-            MAKE_NEW_BUFFER_TAB_GROUP_ON_VIEW_CREATION = false;
-            view_new_tab_group(app, view_id);
-         }
-         else
-         {
-            View_ID prev_view = luis_get_other_child_view(app, view_id);
-            if(prev_view)
-            {
-               Managed_Scope prev_active_view_scope = view_get_managed_scope(app, prev_view);
-               i32 *prev_tab_group_index = scope_attachment(app, prev_active_view_scope, view_tab_group_index, i32);
-               if(prev_tab_group_index)
-                  *tab_group_index = *prev_tab_group_index;
-            }   
-         }
+         group->current_tab = group->tab_count++;
+         group->tabs[group->current_tab] = new_buffer_id;
       }
-      if(*tab_group_index < 0 || *tab_group_index >= BUFFER_TAB_GROUP_COUNT)
-         *tab_group_index = 1;
-      
-      //i32 *current_tab = scope_attachment(app, scope, view_current_tab, i32);
-      //if(current_tab)
+      else
       {
-         Buffer_Tab_Group *group = BUFFER_TAB_GROUPS + *tab_group_index;
-         b32 tab_with_id_already_present = find_tab_with_buffer_id(group, new_buffer_id, &group->current_tab);
-         
          if(luis_view_has_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB)) 
          {
             luis_view_clear_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+            b32 tab_with_id_already_present = find_tab_with_buffer_id(group, new_buffer_id, &group->current_tab);
             //make new one if no tab present and have space
             if(!tab_with_id_already_present && group->tab_count < countof(group->tabs))
             {
@@ -1008,9 +1042,9 @@ luis_view_change_buffer(Application_Links *app, View_ID view_id,
                group->current_tab += 1;
                //group->current_tab = group->tab_count++; //add tab to the very end of array 
             }
-               
+            
          }
-         group->tabs[group->current_tab] = new_buffer_id;
+         group->tabs[group->current_tab] = new_buffer_id;   
       }
    }
 }
