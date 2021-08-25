@@ -19,7 +19,56 @@ CUSTOM_DOC("If the buffer in the active view is writable, inserts a character, o
       //}
       //else leave_current_input_unhandled(app);
    }
-   
+}
+
+CUSTOM_COMMAND_SIG(luis_next_jump)
+CUSTOM_DOC("goto next jump")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   luis_view_set_flags(app, view, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+   goto_next_jump(app);
+}
+
+CUSTOM_COMMAND_SIG(luis_prev_jump)
+CUSTOM_DOC("goto next jump")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   luis_view_set_flags(app, view, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+   goto_prev_jump(app);
+}
+
+
+
+CUSTOM_COMMAND_SIG(luis_switch_view_buffer_location)
+CUSTOM_DOC("Switch back to prev view buffer location")
+{
+   View_ID view = get_active_view(app, Access_Always);
+   View_Buffer_Location *loc = view_get_prev_buffer_location(app, view);
+   if(loc && loc->buffer)
+   {
+      Buffer_ID prev_buffer = view_get_buffer(app, view, Access_Always);
+      i64 prev_cursor = view_get_cursor_pos(app, view);
+      view_set_buffer(app, view, loc->buffer, 0);
+      view_set_cursor_and_preferred_x(app, view, seek_pos(loc->cursor));
+      //NOTE view_input_hanlder does this same code below but only when a view's
+      //buffer changes. Sometimes we want to switch locations within the same buffer
+      //so we do it here too just to be safe
+      loc->buffer = prev_buffer;
+      loc->cursor = prev_cursor;
+   }
+}
+
+internal void
+view_set_current_buffer_location(Application_Links *app, View_ID view, Buffer_ID prev_buffer, i64 prev_cursor)
+{
+   View_Buffer_Location *loc = view_get_prev_buffer_location(app, view);
+   if(loc)
+   {
+      //Buffer_ID prev_buffer = view_get_buffer(app, view, Access_Always);
+      //i64 prev_cursor = view_get_cursor_pos(app, view);
+      loc->buffer = prev_buffer;
+      loc->cursor = prev_cursor;
+   }
 }
 
 CUSTOM_COMMAND_SIG(luis_indent_range)
@@ -70,7 +119,6 @@ CUSTOM_DOC("open in new in same tab")
    if(directory.size) set_hot_directory(app, directory);
    //tab_state_dont_peek_new_buffer(); 
    interactive_open_or_new(app);
-   
    //Buffer_ID new_buffer_id = view_get_buffer(app, view, Access_Always);
    //Buffer_Tab_State *state = get_buffer_tab_state_for_view(app, view);
    //if(state && !make_new_tab) //update the current buffer id tab
@@ -305,6 +353,7 @@ CUSTOM_DOC("build")
       lock_jump_buffer(app, string_u8_litexpr("*compilation*"));
       
       //logprintf(app, "Built and now have %d groups open\n", BUFFER_TAB_GROUP_COUNT);
+      view_set_active(app, view);
    }
 }
 
@@ -720,7 +769,15 @@ luis_isearch(Application_Links *app, Scan_Direction start_scan, i64 first_pos, S
    view_disable_highlight_range(app, view);
    
    if (move_to_new_pos)
+   {
       view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+      View_Buffer_Location *loc = view_get_prev_buffer_location(app, view);
+      if(loc)
+      {
+         loc->buffer = buffer;
+         loc->cursor = first_pos;
+      }
+   }
    else 
       view_set_cursor_and_preferred_x(app, view, seek_pos(first_pos));
    
@@ -833,7 +890,11 @@ CUSTOM_DOC("If the current file is a *.cpp or *.h, attempts to open the correspo
       Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
       Buffer_ID new_buffer = 0;
       if(get_cpp_matching_file_dont_make(app, buffer, &new_buffer))
-         group->tabs[group->current_tab] = new_buffer;
+      {
+         luis_view_set_flags(app, view, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+         view_set_buffer(app, view, new_buffer, 0);
+         //group->tabs[group->current_tab] = new_buffer;
+      }
    }
 }
 
@@ -1051,7 +1112,17 @@ function void
 luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view)
 {
    Render_Caller_Function **prev_render_caller = view_get_prev_render_caller(app, view);
-   if(prev_render_caller)	(*prev_render_caller)(app, frame_info, view);
+   if(prev_render_caller)
+   {
+      //NOTE this is done to make the actual code buffer snap to the code index notes
+      View_Context ctx = view_current_context(app, view);
+      Delta_Rule_Function *prev_delta_rule = ctx.delta_rule;
+      ctx.delta_rule = snap_delta;
+      view_alter_context(app, view, &ctx);
+      (*prev_render_caller)(app, frame_info, view);
+      ctx.delta_rule = prev_delta_rule;
+      view_alter_context(app, view, &ctx);
+   }	
    
    Lister *lister = view_get_lister(app, view);
    if(!lister)	return;
@@ -1182,8 +1253,19 @@ luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view)
    lister->scroll.target.y = clamp_range(scroll_range, lister->scroll.target.y);
    lister->scroll.target.x = 0.f;
    
-   Vec2_f32_Delta_Result delta = delta_apply(app, view,
-                                             frame_info.animation_dt, lister->scroll);
+   Vec2_f32_Delta_Result delta;
+   if(luis_view_has_flags(app, view, VIEW_LISTER_INIT_RENDER_SNAP_TO_LINE))
+   {
+      luis_view_clear_flags(app, view, VIEW_LISTER_INIT_RENDER_SNAP_TO_LINE);
+      
+      View_Context ctx = view_current_context(app, view);
+      String_Const_u8 delta_ctx = view_current_context_hook_memory(app, view, HookID_DeltaRule);
+      delta = delta_apply(app, view, snap_delta, delta_ctx,
+                         frame_info.animation_dt, lister->scroll.position, lister->scroll.target);
+   }
+   else
+      delta = delta_apply(app, view, frame_info.animation_dt, lister->scroll);
+                                             
    lister->scroll.position = delta.p;
    if (delta.still_animating){
       animate_in_n_milliseconds(app, 0);
@@ -1246,6 +1328,26 @@ luis_lister_render(Application_Links *app, Frame_Info frame_info, View_ID view)
    draw_set_clip(app, prev_clip);
 }
 
+internal void
+lister_preview_current_code_index(Application_Links *app, View_ID view, Lister *lister)
+{
+   Code_Index_Note *note = (Code_Index_Note *)lister_get_user_data(lister, lister->raw_item_index);
+   if(note)
+   {
+      //Buffer_ID view_buffer = view_get_buffer(app, view, Access_Always);
+      //if(view_buffer == note->file->buffer)
+      {
+         //NOTE for whatever reason this causes get_next_input_raw to send an abort message and then later we
+         //crash on the 4coder dll side. Seems like 4coder doesn't expect to change buffer mid loop like this?
+         view_set_buffer(app, view, note->file->buffer, SetBuffer_KeepOriginalGUI);
+         
+         view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
+         view_set_mark(app, view, seek_pos(note->pos.first));
+         center_view(app, view, 0.1f);
+      }
+   }
+}
+
 function Lister_Result
 luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index = 0)
 {
@@ -1259,11 +1361,20 @@ luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index 
    
    *prev_render_caller = ctx.render_caller; 
    ctx.render_caller = luis_lister_render;
+   //Delta_Rule_Function *prev_delta_rule_function = ctx.delta_rule;
+   if(best_starting_index > 0 && best_starting_index < lister->filtered.count)
+   {
+      //ctx.delta_rule = snap_delta;
+      luis_view_set_flags(app, view, VIEW_LISTER_INIT_RENDER_SNAP_TO_LINE);
+      lister->item_index = best_starting_index;
+      lister->set_vertical_focus_to_item = true;
+      lister_update_selection_values(lister); 
+      //when can I restore prev_delta_rule_function ?
+   }
    ctx.hides_buffer = false; //NOTE this was originally set to true
    View_Context_Block ctx_block(app, view, &ctx);
    
-   if (lister->handlers.navigate && best_starting_index > 0)
-      lister->handlers.navigate(app, view, lister, best_starting_index);
+   
    
    for (;;)
    {
@@ -1281,6 +1392,7 @@ luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index 
          {
             if (lister->handlers.write_character != 0){
                result = lister->handlers.write_character(app);
+               lister_preview_current_code_index(app, view, lister);
             }
          }break;
          
@@ -1303,6 +1415,7 @@ luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index 
                {
                   if (lister->handlers.backspace != 0){
                      lister->handlers.backspace(app);
+                     lister_preview_current_code_index(app, view, lister);
                   }
                   else if (lister->handlers.key_stroke != 0){
                      result = lister->handlers.key_stroke(app);
@@ -1478,7 +1591,8 @@ luis_run_lister(Application_Links *app, Lister *lister, i32 best_starting_index 
 }
 
 
-function void
+
+internal void
 lister_code_index_navigate(Application_Links *app, View_ID view, Lister *lister, i32 delta)
 {
    i32 new_index = lister->item_index + delta;
@@ -1495,21 +1609,7 @@ lister_code_index_navigate(Application_Links *app, View_ID view, Lister *lister,
    lister->set_vertical_focus_to_item = true;
    lister_update_selection_values(lister); //raw_item_index should be set correctly after this line
    
-   Code_Index_Note *note = (Code_Index_Note *)lister_get_user_data(lister, lister->raw_item_index);
-   if(note)
-   {
-      //Buffer_ID view_buffer = view_get_buffer(app, view, Access_Always);
-      //if(view_buffer == note->file->buffer)
-      {
-         //NOTE for whatever reason this causes get_next_input_raw to send an abort message and then later we
-         //crash on the 4coder dll side. Seems like 4coder doesn't expect to change buffer mid loop like this?
-         view_set_buffer(app, view, note->file->buffer, SetBuffer_KeepOriginalGUI);
-         
-         view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
-         view_set_mark(app, view, seek_pos(note->pos.first));
-         center_view(app, view, 0.1f);
-      }
-   }  
+   lister_preview_current_code_index(app, view, lister);  
 }
 
 CUSTOM_COMMAND_SIG(luis_show_buffer_code_notes)
@@ -1532,6 +1632,7 @@ CUSTOM_DOC("show all the code notes found for this buffer")
    i32 best_starting_index = 0;
    i64 smallest_diff = max_i64;
    Code_Index_File *file = code_index_get_file(buffer_id);
+   Code_Index_Note *best_starting_note = 0;
    if(file)
    {
       for(i32 i = 0; i < file->note_array.count; i += 1)
@@ -1542,22 +1643,28 @@ CUSTOM_DOC("show all the code notes found for this buffer")
          {
             smallest_diff = diff;
             best_starting_index = lister.lister.current->options.count;
+            best_starting_note = note;
          }
          
          if(!note->parent) //only add top level notes
          {
             Lister_Prealloced_String status = {};
-            Lister_Prealloced_String line_string = lister_prealloced(push_buffer_line(app, lister.lister.current->arena, buffer_id, 
-                                                           get_line_number_from_pos(app, buffer_id, note->pos.min)));
-            if(line_string.string.str)
-               lister_add_item(lister, line_string, status, (void*)note, 0);
+            Lister_Prealloced_String search_string;
+            if(note->note_kind == CodeIndexNote_Function)
+               search_string = lister_prealloced(push_stringf(lister.lister.current->arena, "%.*s()", string_expand(note->text)));
             else
-            {
-               Lister_Prealloced_String note_name = lister_prealloced(push_string_copy(lister.lister.current->arena, note->text));
-               lister_add_item(lister, note_name, status, (void*)note, 0);
-            }
+               search_string = lister_prealloced(push_string_copy(lister.lister.current->arena, note->text));
+            
+            lister_add_item(lister, search_string, status, (void*)note, 0);
          }
-         
+      }
+      
+      if(best_starting_note)
+      {
+         view_set_buffer(app, view, best_starting_note->file->buffer, SetBuffer_KeepOriginalGUI);
+         view_set_cursor_and_preferred_x(app, view, seek_pos(best_starting_note->pos.first));
+         view_set_mark(app, view, seek_pos(best_starting_note->pos.first));
+         center_view(app, view, 0.1f);
       }
       
       //lister.lister.current->item_index = best_starting_index; //NOTE set item_index, with clamping and whatever
@@ -1567,6 +1674,7 @@ CUSTOM_DOC("show all the code notes found for this buffer")
       Lister_Result l_result = luis_run_lister(app, lister, best_starting_index);
       if (!l_result.canceled)
       {
+         view_set_current_buffer_location(app, view, buffer_id, init_pos);
          Code_Index_Note *note = (Code_Index_Note *)l_result.user_data;
          view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));
          luis_center_view_top(app);
@@ -1615,15 +1723,13 @@ show_buffer_code_notes_all_buffers(Application_Links *app, b32 show_functions, b
                (note->note_kind == CodeIndexNote_Macro    && show_macros))
             {
                Lister_Prealloced_String status = {};
-               Lister_Prealloced_String line_string = lister_prealloced(push_buffer_line(app, lister.lister.current->arena, buffer, 
-                                                                                         get_line_number_from_pos(app, buffer, note->pos.min)));
-               if(line_string.string.str)
-                  lister_add_item(lister, line_string, status, (void*)note, 0);
+               Lister_Prealloced_String search_string;
+               if(note->note_kind == CodeIndexNote_Function)
+                  search_string = lister_prealloced(push_stringf(lister.lister.current->arena, "%.*s()", string_expand(note->text)));
                else
-               {
-                  Lister_Prealloced_String note_name = lister_prealloced(push_string_copy(lister.lister.current->arena, note->text));
-                  lister_add_item(lister, note_name, status, (void*)note, 0);
-               }
+                  search_string = lister_prealloced(push_string_copy(lister.lister.current->arena, note->text));
+                
+               lister_add_item(lister, search_string, status, (void*)note, 0);
             }
             
          }
@@ -1633,6 +1739,7 @@ show_buffer_code_notes_all_buffers(Application_Links *app, b32 show_functions, b
    Lister_Result l_result = luis_run_lister(app, lister);
    if (!l_result.canceled)
    {
+      view_set_current_buffer_location(app, view, init_buffer, init_pos);
       Code_Index_Note *note = (Code_Index_Note *)l_result.user_data;
       view_set_buffer(app, view, note->file->buffer, 0);
       view_set_cursor_and_preferred_x(app, view, seek_pos(note->pos.first));

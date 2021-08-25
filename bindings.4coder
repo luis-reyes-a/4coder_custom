@@ -1,7 +1,8 @@
 
 keys_global = {
 	 { "luis_escape",                "Escape"},
-	 { "change_active_panel",        "Semicolon", "Control" },
+	 { "change_active_panel",              "Semicolon", "Control" },
+	 { "luis_switch_view_buffer_location", "Quote", "Control" },
 	 { "basic_change_active_panel",     "Semicolon", "Alt" },
     { "luis_tab_prev",                 "Left",  "Alt" },
     { "luis_tab_next",                 "Right", "Alt" },
@@ -15,8 +16,8 @@ keys_global = {
 	 { "save",                          "S", "Control" },
     { "save_all_dirty_buffers",        "S", "Control", "Shift" },
 
-    { "goto_prev_jump",                "PageUp",   "Control" },
-    { "goto_next_jump",                "PageDown", "Control" },
+    { "luis_prev_jump",                "PageUp",   "Control" },
+    { "luis_next_jump",                "PageDown", "Control" },
  
     { "luis_toggle_modal_mode",        "D", "Control" },
     { "command_lister",                "X", "Alt" },
@@ -33,10 +34,10 @@ keys_global = {
     { "page_down",      "PageDown" },
 
 	 
-	 { "luis_code_index_prev",               "Up",   "Alt" },
-    { "luis_code_index_next",               "Down", "Alt" },
-	 { "luis_peek_code_index_up",            "Up",   "Control" },
-    { "luis_peek_code_index_down",          "Down", "Control" },
+	 { "luis_code_index_prev",    "Up",   "Alt" },
+    { "luis_code_index_next",    "Down", "Alt" },
+	 { "move_line_up",            "Up",   "Control" },
+    { "move_line_down",          "Down", "Control" },
 	 
 	 { "word_complete",           "J", "Control" },
     
@@ -109,6 +110,7 @@ keys_file = {
     { "query_replace",               "Q", "Control" },
 	 { "query_replace_identifier",    "Q", "Alt" },
     { "luis_toggle_matching_cpp",    "K", "Control" },
+	 { "delete_line",                 "K", "Alt" },
 
     { "luis_show_buffer_code_notes",      "N", "Control" },
 	

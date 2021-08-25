@@ -16,7 +16,7 @@ defcolor_mark = 0xffCBC420;
 
 defcolor_text_default = 0xFFEEFFFF;
 defcolor_at_highlight = defcolor_back;
-defcolor_comment        = 0xff546E7A;
+defcolor_comment        = 0xff6f91a1; //0xff546E7A;
 defcolor_comment_pop    = {0xFFCCDC90, 0xFFF18C96}; //{NOTE, TODO}
 defcolor_keyword        = 0xFFC792EA;
 defcolor_str_constant   = 0xff89DDFF;
@@ -53,7 +53,7 @@ luiscolor_type     = 0xffa3ffda; //0xFFF78C6C;
 luiscolor_modal_cursor = 0xffff5e73;
 
 luiscolor_variable_decl = defcolor_text_default; //0xfffdffde;
-luiscolor_logical_not = defcolor_str_constant;
+luiscolor_logical_not   = 0xFFF18C96;
 
 luiscolor_tab_current   = defcolor_text_default;
 luiscolor_tab_regular   = luiscolor_function;

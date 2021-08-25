@@ -173,6 +173,7 @@ CUSTOM_DOC("Input consumption loop for default view behavior")
       {
          //b32 do_kill_tab_group = luis_view_has_flags(app, view, VIEW_KILL_TAB_GROUP_ON_VIEW_CLOSE);
          //i32 tab_group_index = view_get_tab_group_index(app, view);
+         Buffer_ID buffer_id_before_command = view_get_buffer(app, view, Access_Always);
          i64 cursor_pos_before_executed_command = view_get_cursor_pos(app, view); 
          map_result.command(app);
          if(map_result.command == paste)
@@ -182,6 +183,18 @@ CUSTOM_DOC("Input consumption loop for default view behavior")
          
          if(map_result.command != luis_peek_code_index_up && map_result.command != luis_peek_code_index_down)
             CURSOR_PEEK_CODE_INDEX_RELATIVE_LINE_OFFSET = -1;
+         
+         //NOTE we do this here instead of view_change_buffer because there we don't know
+         //what the previous cursor pos and I can't find a way to get a view's buffer's cursor pos
+         if(view_get_buffer(app, view, Access_Always) != buffer_id_before_command)
+         {
+            View_Buffer_Location *loc = view_get_prev_buffer_location(app, view);
+            if(loc)
+            {
+               loc->buffer = buffer_id_before_command;
+               loc->cursor = cursor_pos_before_executed_command;
+            }
+         }
          //if(!view_exists(app, view) && do_kill_tab_group) //pseudo-hook for when a view is being destroyed
          //{
             //kill_tab_group(app, tab_group_index);
@@ -1029,22 +1042,28 @@ luis_view_change_buffer(Application_Links *app, View_ID view_id,
       }
       else
       {
-         if(luis_view_has_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB)) 
+         i32 tab_with_new_buffer_already = find_tab_with_buffer_id(group, new_buffer_id);
+         if(tab_with_new_buffer_already >= 0)
          {
-            luis_view_clear_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
-            b32 tab_with_id_already_present = find_tab_with_buffer_id(group, new_buffer_id, &group->current_tab);
-            //make new one if no tab present and have space
-            if(!tab_with_id_already_present && group->tab_count < countof(group->tabs))
-            {
-               group->tab_count += 1;
-               for(i32 tab_index = group->tab_count - 1; tab_index > (group->current_tab + 1); tab_index -= 1)
-                  group->tabs[tab_index] = group->tabs[tab_index - 1];
-               group->current_tab += 1;
-               //group->current_tab = group->tab_count++; //add tab to the very end of array 
-            }
-            
+            group->current_tab = tab_with_new_buffer_already;
+            //NOTE I don't want duplicates ever but you could do it...
+            luis_view_clear_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB); 
          }
-         group->tabs[group->current_tab] = new_buffer_id;   
+         else
+         {
+            if(luis_view_has_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB)) 
+            {
+               luis_view_clear_flags(app, view_id, VIEW_ADD_NEW_BUFFER_AS_NEW_TAB);
+               if(group->tab_count < countof(group->tabs))
+               {
+                  group->tab_count += 1;
+                  for(i32 tab_index = group->tab_count - 1; tab_index > (group->current_tab + 1); tab_index -= 1)
+                     group->tabs[tab_index] = group->tabs[tab_index - 1];
+                  group->current_tab += 1;      
+               }
+            }
+         }
+         group->tabs[group->current_tab] = new_buffer_id;
       }
    }
 }

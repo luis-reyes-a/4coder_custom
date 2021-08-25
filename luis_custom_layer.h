@@ -19,6 +19,7 @@ CUSTOM_ID(attachment, view_code_peek_state);
 //CUSTOM_ID(attachment, view_tab_group_index);
 CUSTOM_ID(attachment, view_tab_group);
 CUSTOM_ID(attachment, view_prev_render_caller);
+CUSTOM_ID(attachment, view_prev_buffer_location);
 //CUSTOM_ID(attachment, view_current_tab); not good idea, you'd have to store per view, per BUFFER_TAB_GROUP_COUNT
 
 CUSTOM_ID(colors, luiscolor_type);
@@ -49,9 +50,16 @@ enum Custom_View_Flags
    VIEW_IS_PEEK_WINDOW        = (1 << 0),
    VIEW_NOTEPAD_MODE_MARK_SET = (1 << 1),
    VIEW_ADD_NEW_BUFFER_AS_NEW_TAB = (1 << 2), //otherwise we overwrite current_tab
+   VIEW_LISTER_INIT_RENDER_SNAP_TO_LINE = (1 << 3),
    //VIEW_KILL_TAB_GROUP_ON_VIEW_CLOSE = (1 << 3), //search in luis_hooks.cpp if you want this behaviour
 };
 
+
+struct View_Buffer_Location 
+{
+   Buffer_ID buffer;
+   i64 cursor;
+};
 
 
 //NOTE(luis) you can build panel layouts into this and just store a global current_workspace
@@ -95,15 +103,17 @@ luis_view_clear_flags(Application_Links *app, View_ID view, u32 flags)
       *view_flags &= ~flags;
 }
 
-internal b32
-find_tab_with_buffer_id(Buffer_Tab_Group *group, Buffer_ID id, i32 *out_found_index)
+internal i32
+find_tab_with_buffer_id(Buffer_Tab_Group *group, Buffer_ID id)
 {
-   foreach_index_inc(i, group->tab_count) if(group->tabs[i] == id)
-   {
-      *out_found_index = i;
-      return true;
-   }
-   return false;
+   i32 index = -1;
+   foreach_index_inc(i, group->tab_count) 
+      if(group->tabs[i] == id)
+   	{
+      	index = i;
+      	break;
+   	}
+   return index;
 }
 
 
@@ -727,6 +737,14 @@ view_get_prev_render_caller(Application_Links *app, View_ID view)
    Managed_Scope scope = view_get_managed_scope(app, view);
    Render_Caller_Function **func = (Render_Caller_Function **)scope_attachment(app, scope, view_prev_render_caller, void *);
    return func;
+}
+
+internal View_Buffer_Location *
+view_get_prev_buffer_location(Application_Links *app, View_ID view)
+{
+   Managed_Scope scope = view_get_managed_scope(app, view);
+   View_Buffer_Location *loc = scope_attachment(app, scope, view_prev_buffer_location, View_Buffer_Location);
+   return loc;
 }
 
 #endif //LUIS_CUSTOM_LAYER_H
